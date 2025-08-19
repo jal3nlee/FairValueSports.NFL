@@ -1,40 +1,37 @@
+# app.py
 import os, math, requests
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
-
-# --- Branding: favicon + logo (place this at the very top of app.py) ---
 from pathlib import Path
-import streamlit as st
 
-# --- Branding: favicon + logo (MUST be first Streamlit call) ---
-from pathlib import Path
-import streamlit as st
-
+# =======================
+# Branding (favicon + logo)
+# =======================
 LOGO_PATH = "assets/logo.png"
 FAVICON_PATH = "assets/favicon.png"
 
+# MUST be the first Streamlit call:
 st.set_page_config(
     page_title="Fair Value Sports",
     page_icon=(FAVICON_PATH if Path(FAVICON_PATH).is_file() else "🏈"),
     layout="wide"
 )
 
-# Optional: show logo in header + sidebar (only if file exists)
+# Header + Sidebar logo (optional)
 if Path(LOGO_PATH).is_file():
     st.image(LOGO_PATH, width=200)
 with st.sidebar:
     if Path(LOGO_PATH).is_file():
         st.image(LOGO_PATH, width=160)
-# --- end branding ---
 
-# ========= Auth (Supabase) =========
+# =======================
+# Auth (Supabase)
+# =======================
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-
-st.set_page_config(page_title="Fair Value Sports - NFL", page_icon="🏈", layout="wide")
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
     st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
@@ -57,7 +54,7 @@ def auth_view():
                 res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                 st.session_state.sb_session = res.session
                 st.experimental_rerun()
-            except Exception as e:
+            except Exception:
                 st.error("Sign-in failed. Check your email/password or verify your email.")
 
     with tabs[1]:
@@ -67,7 +64,7 @@ def auth_view():
             try:
                 supabase.auth.sign_up({"email": email2, "password": pw2})
                 st.success("Account created. Check your email to verify, then sign in.")
-            except Exception as e:
+            except Exception:
                 st.error("Sign-up failed. Try a different email or password.")
 
 def require_auth():
@@ -75,12 +72,14 @@ def require_auth():
         auth_view()
         st.stop()
 
-# ======== Your NFL app (wrapped below) ========
+# =======================
+# NFL app config
+# =======================
 API_BASE = "https://api.the-odds-api.com/v4"
 API_KEY  = os.getenv("ODDS_API_KEY", "")
-
 EASTERN = ZoneInfo("America/New_York")
 
+# ---------- helpers ----------
 def american_to_implied_prob(odds):
     try: o = int(odds)
     except Exception: return None
@@ -115,16 +114,14 @@ def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
     if not dt: return None
     et = dt.astimezone(EASTERN)
     if snap_odd_minutes:
-        if et.minute == 1:
-            et = et - timedelta(minutes=1)
-        elif et.minute == 59:
-            et = et + timedelta(minutes=1)
+        if et.minute == 1:  et = et - timedelta(minutes=1)
+        elif et.minute == 59: et = et + timedelta(minutes=1)
     dow = et.strftime("%a")
     md  = f"{et.month}/{et.day}"
     tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
-# ---- Hard-coded NFL weeks (Week 1 = Sep 4 00:00 UTC, Week 0 before that) ----
+# ---- Hard-coded NFL weeks (Week 1 = Sep 4 00:00 UTC; Week 0 = before that) ----
 def nfl_week1_kickoff_thursday_utc(year: int) -> datetime:
     return datetime(year, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -206,6 +203,9 @@ def best_prices(df_evt_books: pd.DataFrame):
     ].rename(columns={"book":"away_book"})
     return pd.merge(home_best, away_best, on=["event_id","home_team","away_team"], how="outer")
 
+# =======================
+# Main app
+# =======================
 def run_app():
     if not API_KEY:
         st.error("Missing ODDS_API_KEY environment variable."); st.stop()
@@ -264,7 +264,7 @@ def run_app():
 
     cons = compute_consensus_fair_probs(df_books)
     bests = best_prices(df_books)
-    merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
+    merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner"])
 
     # Rows
     rows = []
@@ -321,8 +321,8 @@ def run_app():
     show["Implied Probability"] = show["Implied Probability"].map(lambda x: f"{x*100:.1f}%")
     show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
 
-    st.caption(f"Window: {caption_label}")
     st.subheader("Games & EV")
+    st.caption(f"Window: {caption_label}")
     st.dataframe(
         show[["Date","Game","Pick","Best Odds","Best Book","Implied Probability","EV%","Kelly %","Stake ($)"]],
         use_container_width=True, hide_index=True,
