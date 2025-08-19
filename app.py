@@ -39,13 +39,19 @@ def parse_iso_dt_utc(iso_s: str):
     try: return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
     except Exception: return None
 
-def fmt_date_est_str(iso_s: str):
+def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
+    """Display like 'Thu 8/14 7:30 PM ET' and optionally snap :01->:00, :59->next hour (display-only)."""
     dt = parse_iso_dt_utc(iso_s)
     if not dt: return None
     et = dt.astimezone(EASTERN)
-    dow = et.strftime("%a")              # e.g., Thu
-    md  = f"{et.month}/{et.day}"         # e.g., 8/14
-    tm  = et.strftime("%I:%M %p").lstrip("0")  # e.g., 7:30 PM
+    if snap_odd_minutes:
+        if et.minute == 1:
+            et = et - timedelta(minutes=1)
+        elif et.minute == 59:
+            et = et + timedelta(minutes=1)
+    dow = et.strftime("%a")                # Thu
+    md  = f"{et.month}/{et.day}"           # 8/14
+    tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
 # ---------- HARD-CODED NFL WEEK CALENDAR ----------
@@ -166,14 +172,16 @@ else:
                     else (f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
 
 # Inputs
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 with c1:
     weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
 with c2:
     kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+with c3:
+    min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5)
 
-# TEMP: show-all toggle (if OFF, keep only EV% >= 0)
-show_all = st.checkbox("Show all games (ignore EV filter)", value=True)
+# Filters
+show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
 
 # Fetch odds
 params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
@@ -199,7 +207,7 @@ cons = compute_consensus_fair_probs(df_books)
 bests = best_prices(df_books)
 merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
 
-# Build output rows (initially include all)
+# Build output rows
 rows = []
 for _, r in merged.iterrows():
     date_str = fmt_date_est_str(r.get("commence_time"))
@@ -214,9 +222,9 @@ for _, r in merged.iterrows():
             "Date": date_str,
             "Game": game_label,
             "Pick": r["home_team"],
-            "Best Odds": price,                  # numeric; we'll pretty-print with + later
+            "Best Odds": price,                  # numeric for sort; pretty-print later
             "Best Book": r.get("home_book"),
-            "Implied Probability": fair_p,       # decimal now; show as % later
+            "Implied Probability": fair_p,       # decimal; show % later
             "EV%": ev_pct,
             "Kelly %": kelly*100.0,
             "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
@@ -243,16 +251,16 @@ df = pd.DataFrame(rows)
 if df.empty:
     st.info("No sides available."); st.stop()
 
-# Apply temp EV filter if requested (EV% >= 0)
+# Apply EV% filter unless show_all
 if not show_all:
-    df = df[df["EV%"] >= 0].reset_index(drop=True)
+    df = df[df["EV%"] >= float(min_ev)].reset_index(drop=True)
     if df.empty:
-        st.info("No games meet EV% ≥ 0 with this window."); st.stop()
+        st.info("No games meet the EV% filter for this window."); st.stop()
 
 # Sort
 df = df.sort_values(["EV%","Implied Probability"], ascending=[False, False]).reset_index(drop=True)
 
-# Pretty formatting for display
+# Pretty formatting
 show = df.copy()
 
 def fmt_odds(o):
