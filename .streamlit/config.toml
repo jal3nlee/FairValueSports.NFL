@@ -1,8 +1,7 @@
-# .streamlit/config.toml
 [theme]
-base = "light"
-primaryColor = "#F5F7FC"
-backgroundColor = "#4A79BD"
-secondaryBackgroundColor = "#F5F7FC"
-textColor = "#231F20"
-font = "sans serif"   # Streamlit supports: "sans serif" | "serif" | "monospace"
+base = "light"                       # app uses light theme
+primaryColor = "#4A79BD"             # buttons, sliders, highlights
+backgroundColor = "#FFFFFF"          # page background
+secondaryBackgroundColor = "#F5F7FC" # cards/sidebar (soft tint)
+textColor = "#231F20"                # main text color
+font = "sans serif"                  # or "serif" | "monospace"
