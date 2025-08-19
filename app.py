@@ -40,20 +40,42 @@ def fmt_date_utc_str(iso_s: str):
     dt = parse_iso_dt_utc(iso_s)
     return dt.strftime('%Y-%m-%d %H:%M UTC') if dt else None
 
-def window_next_days(days=7):
-    start = datetime.now(timezone.utc)
-    end = start + timedelta(days=days)
-    return start, end
+# ---------- NFL week calendar ----------
+def first_monday_of_september_utc(year: int) -> datetime:
+    d = datetime(year, 9, 1, tzinfo=timezone.utc)
+    delta = (0 - d.weekday()) % 7  # Monday=0
+    return d + timedelta(days=delta)
 
-def window_nfl_week(now_utc=None):
-    # Thu 00:00 UTC through next Tue 23:59 UTC
-    if now_utc is None: now_utc = datetime.now(timezone.utc)
-    wd = now_utc.weekday()  # Mon=0..Sun=6
-    days_since_thu = (wd - 3) % 7
-    start = (now_utc - timedelta(days=days_since_thu)).replace(hour=0, minute=0, second=0, microsecond=0)
+def nfl_week1_kickoff_thursday_utc(year: int) -> datetime:
+    # NFL kickoff is the Thursday after the first Monday in September
+    mon = first_monday_of_september_utc(year)
+    return mon + timedelta(days=3)   # Thursday 00:00 UTC
+
+def nfl_week_window_utc(week_index: int, now_utc: datetime) -> tuple[datetime, datetime]:
+    """
+    Week 0 = the 7-day block BEFORE Week 1 (preseason).
+    Weeks 1–18 = regular season (Thu–Tue). Week 19 = first postseason block after Week 18.
+    Window spans Thu 00:00 UTC -> Tue 23:59:59 UTC.
+    """
+    wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
+    if week_index == 0:
+        start = wk1 - timedelta(days=7)
+    else:
+        start = wk1 + timedelta(days=7*(week_index-1))
     end = start + timedelta(days=5, hours=23, minutes=59, seconds=59)
     return start, end
 
+def infer_current_week_index(now_utc: datetime) -> int:
+    wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
+    if now_utc < wk1:
+        return 0  # the week before Week 1
+    weeks = int((now_utc - wk1).days // 7) + 1  # Week 1..∞
+    return max(0, min(19, weeks))  # clamp to 19
+
+def sport_key_for_week(week_index: int, now_utc: datetime) -> str:
+    return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
+
+# ---------- odds shaping ----------
 def build_market(events, selected_books=None):
     rows = []
     for ev in events:
@@ -114,8 +136,25 @@ if not API_KEY:
     st.error("Missing ODDS_API_KEY environment variable."); st.stop()
 
 region = "us"
-window_choice = st.selectbox("Window", ["Next 7 days", "This NFL Week (Thu–Tue)"], index=0)
 
+# Window: Today OR NFL Week (0–19)
+now = datetime.now(timezone.utc)
+current_week = infer_current_week_index(now)
+
+mode = st.radio("Window", ["Today", "NFL Week"], horizontal=True, index=1)
+if mode == "Today":
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(hours=23, minutes=59, seconds=59)
+    # Use preseason key if today's date is before Week 1; else regular
+    sport_key = "americanfootball_nfl_preseason" if now < nfl_week1_kickoff_thursday_utc(now.year) else "americanfootball_nfl"
+    window_start, window_end = day_start, day_end
+    sel_week = None
+else:
+    sel_week = st.selectbox("NFL Week (0–19)", options=list(range(0, 20)), index=min(max(current_week,0),19))
+    sport_key = sport_key_for_week(sel_week, now)
+    window_start, window_end = nfl_week_window_utc(sel_week, now)
+
+# User inputs
 c1, c2, c3 = st.columns(3)
 with c1:
     weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
@@ -124,22 +163,21 @@ with c2:
 with c3:
     min_ev = st.number_input("Minimum EV% to display", value=4.0, step=0.5)
 
-# Fetch odds
+# Fetch odds for chosen key
 params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
 try:
-    events = requests.get(f"{API_BASE}/sports/americanfootball_nfl/odds", params=params, timeout=30).json()
+    events = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30).json()
 except Exception as e:
     st.error(f"API error: {e}"); st.stop()
 
 if not isinstance(events, list) or not events:
     st.warning("No events returned."); st.stop()
 
-# Window filter
-now = datetime.now(timezone.utc)
-start, end = window_next_days(7) if window_choice.startswith("Next 7") else window_nfl_week(now)
-events = [ev for ev in events if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and start <= dt <= end]
+# Filter to selected window
+events = [ev for ev in events if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end]
 if not events:
-    st.info("No NFL games in the selected window."); st.stop()
+    label = "Today" if mode == "Today" else f"Week {sel_week}"
+    st.info(f"No NFL games in the selected window ({label})."); st.stop()
 
 # Build -> devig -> best
 df_books = build_market(events, selected_books=None)
@@ -188,13 +226,21 @@ df = df.sort_values(["EV%","Fair Prob"], ascending=[False, False]).reset_index(d
 total_stake = float(df["Stake ($)"].sum())
 util_pct = 100.0 * (total_stake / weekly_bankroll) if weekly_bankroll > 0 else 0.0
 
+# Header context
+if mode == "Today":
+    st.caption(f"Window: Today ({window_start.strftime('%Y-%m-%d')} UTC)")
+else:
+    st.caption(f"Window: NFL Week {sel_week} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
+
 st.subheader("Qualified Picks")
 show = df.copy()
 show["Fair Prob"] = show["Fair Prob"].map(lambda x: f"{x:.3f}")
 show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
-st.dataframe(show[["Date","Event","Pick","Side","Best Odds","Best Book","Fair Prob","EV%","Kelly %","Stake ($)"]],
-             use_container_width=True)
-
+st.dataframe(
+    show[["Date","Event","Pick","Side","Best Odds","Best Book","Fair Prob","EV%","Kelly %","Stake ($)"]],
+    use_container_width=True,
+    hide_index=True,
+)
 color = "green" if util_pct < 50 else ("orange" if util_pct < 70 else "red")
 st.markdown(
     f"**Total Suggested Stake:** ${total_stake:,.2f}  |  **Utilization:** "
