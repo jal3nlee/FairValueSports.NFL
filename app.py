@@ -72,10 +72,10 @@ def infer_current_week_index(now_utc: datetime) -> int:
     weeks = int((now_utc - wk1).days // 7) + 1  # Week 1..∞
     return max(0, min(19, weeks))  # clamp to 19
 
-def sport_key_for_week(week_index: int, now_utc: datetime) -> str:
+def sport_key_for_week(week_index: int) -> str:
     return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
 
-# ---------- odds shaping ----------
+# odds shaping
 def build_market(events, selected_books=None):
     rows = []
     for ev in events:
@@ -137,24 +137,26 @@ if not API_KEY:
 
 region = "us"
 
-# Window: Today OR NFL Week (0–19)
+# Dropdown with exactly: Today, Week X (X is current week)
 now = datetime.now(timezone.utc)
 current_week = infer_current_week_index(now)
+window_options = ["Today", f"Week {current_week}"]
+window_choice = st.selectbox("Window", window_options, index=1)
 
-mode = st.radio("Window", ["Today", "NFL Week"], horizontal=True, index=1)
-if mode == "Today":
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(hours=23, minutes=59, seconds=59)
-    # Use preseason key if today's date is before Week 1; else regular
-    sport_key = "americanfootball_nfl_preseason" if now < nfl_week1_kickoff_thursday_utc(now.year) else "americanfootball_nfl"
-    window_start, window_end = day_start, day_end
-    sel_week = None
+if window_choice == "Today":
+    window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
+    # If today is before Week 1, use preseason key; else regular key
+    sport_key = sport_key_for_week(0 if current_week == 0 else current_week)
+    caption_label = f"Today ({window_start.strftime('%Y-%m-%d')} UTC)"
 else:
-    sel_week = st.selectbox("NFL Week (0–19)", options=list(range(0, 20)), index=min(max(current_week,0),19))
-    sport_key = sport_key_for_week(sel_week, now)
-    window_start, window_end = nfl_week_window_utc(sel_week, now)
+    # Parse week index from label "Week X"
+    week_index = current_week
+    window_start, window_end = nfl_week_window_utc(week_index, now)
+    sport_key = sport_key_for_week(week_index)
+    caption_label = f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC"
 
-# User inputs
+# Inputs
 c1, c2, c3 = st.columns(3)
 with c1:
     weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
@@ -163,7 +165,7 @@ with c2:
 with c3:
     min_ev = st.number_input("Minimum EV% to display", value=4.0, step=0.5)
 
-# Fetch odds for chosen key
+# Fetch odds
 params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
 try:
     events = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30).json()
@@ -173,11 +175,10 @@ except Exception as e:
 if not isinstance(events, list) or not events:
     st.warning("No events returned."); st.stop()
 
-# Filter to selected window
+# Filter to chosen window
 events = [ev for ev in events if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end]
 if not events:
-    label = "Today" if mode == "Today" else f"Week {sel_week}"
-    st.info(f"No NFL games in the selected window ({label})."); st.stop()
+    st.info(f"No NFL games in the selected window ({caption_label})."); st.stop()
 
 # Build -> devig -> best
 df_books = build_market(events, selected_books=None)
@@ -226,13 +227,9 @@ df = df.sort_values(["EV%","Fair Prob"], ascending=[False, False]).reset_index(d
 total_stake = float(df["Stake ($)"].sum())
 util_pct = 100.0 * (total_stake / weekly_bankroll) if weekly_bankroll > 0 else 0.0
 
-# Header context
-if mode == "Today":
-    st.caption(f"Window: Today ({window_start.strftime('%Y-%m-%d')} UTC)")
-else:
-    st.caption(f"Window: NFL Week {sel_week} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
-
+st.caption(f"Window: {caption_label}")
 st.subheader("Qualified Picks")
+
 show = df.copy()
 show["Fair Prob"] = show["Fair Prob"].map(lambda x: f"{x:.3f}")
 show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
@@ -241,6 +238,7 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
 )
+
 color = "green" if util_pct < 50 else ("orange" if util_pct < 70 else "red")
 st.markdown(
     f"**Total Suggested Stake:** ${total_stake:,.2f}  |  **Utilization:** "
