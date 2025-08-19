@@ -40,42 +40,38 @@ def fmt_date_utc_str(iso_s: str):
     dt = parse_iso_dt_utc(iso_s)
     return dt.strftime('%Y-%m-%d %H:%M UTC') if dt else None
 
-# ---------- NFL week calendar ----------
-def first_monday_of_september_utc(year: int) -> datetime:
-    d = datetime(year, 9, 1, tzinfo=timezone.utc)
-    delta = (0 - d.weekday()) % 7  # Monday=0
-    return d + timedelta(days=delta)
-
+# ---------- HARD-CODED NFL WEEK CALENDAR ----------
 def nfl_week1_kickoff_thursday_utc(year: int) -> datetime:
-    # NFL kickoff is the Thursday after the first Monday in September
-    mon = first_monday_of_september_utc(year)
-    return mon + timedelta(days=3)   # Thursday 00:00 UTC
+    """Hard-code Week 1 kickoff as Sep 4 (00:00 UTC) for the given year."""
+    return datetime(year, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
 
-def nfl_week_window_utc(week_index: int, now_utc: datetime) -> tuple[datetime, datetime]:
+def nfl_week_window_utc(week_index: int, now_utc: datetime):
     """
-    Week 0 = the 7-day block BEFORE Week 1 (preseason).
-    Weeks 1–18 = regular season (Thu–Tue). Week 19 = first postseason block after Week 18.
-    Window spans Thu 00:00 UTC -> Tue 23:59:59 UTC.
+    Week 0: ANY date before Sep 4 of this year (Jan 1 00:00 UTC -> Sep 3 23:59:59 UTC).
+    Week >=1: Thu 00:00 UTC -> Tue 23:59:59 UTC blocks starting from Sep 4.
     """
     wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
     if week_index == 0:
-        start = wk1 - timedelta(days=7)
-    else:
-        start = wk1 + timedelta(days=7*(week_index-1))
-    end = start + timedelta(days=5, hours=23, minutes=59, seconds=59)
+        start = datetime(now_utc.year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        end   = wk1 - timedelta(seconds=1)  # up to Sep 3 23:59:59
+        return start, end
+    # Week 1..19
+    start = wk1 + timedelta(days=7*(week_index-1))
+    end   = start + timedelta(days=5, hours=23, minutes=59, seconds=59)  # Thu..Tue
     return start, end
 
 def infer_current_week_index(now_utc: datetime) -> int:
+    """Return 0 if before Sep 4; else 1..19 based on 7-day blocks since Sep 4."""
     wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
     if now_utc < wk1:
-        return 0  # the week before Week 1
-    weeks = int((now_utc - wk1).days // 7) + 1  # Week 1..∞
-    return max(0, min(19, weeks))  # clamp to 19
+        return 0
+    weeks = (now_utc - wk1).days // 7 + 1
+    return max(1, min(19, weeks))
 
 def sport_key_for_week(week_index: int) -> str:
     return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
 
-# odds shaping
+# ---------- odds shaping ----------
 def build_market(events, selected_books=None):
     rows = []
     for ev in events:
@@ -137,7 +133,7 @@ if not API_KEY:
 
 region = "us"
 
-# Dropdown with exactly: Today, Week X (X is current week)
+# Dropdown with exactly: Today, Week X (X = current hard-coded week index)
 now = datetime.now(timezone.utc)
 current_week = infer_current_week_index(now)
 window_options = ["Today", f"Week {current_week}"]
@@ -146,15 +142,16 @@ window_choice = st.selectbox("Window", window_options, index=1)
 if window_choice == "Today":
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
-    # If today is before Week 1, use preseason key; else regular key
-    sport_key = sport_key_for_week(0 if current_week == 0 else current_week)
+    sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
     caption_label = f"Today ({window_start.strftime('%Y-%m-%d')} UTC)"
 else:
-    # Parse week index from label "Week X"
-    week_index = current_week
+    week_index   = current_week
     window_start, window_end = nfl_week_window_utc(week_index, now)
-    sport_key = sport_key_for_week(week_index)
-    caption_label = f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC"
+    sport_key    = sport_key_for_week(week_index)
+    if week_index == 0:
+        caption_label = f"Week 0 (before Sep 4) — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC"
+    else:
+        caption_label = f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC"
 
 # Inputs
 c1, c2, c3 = st.columns(3)
