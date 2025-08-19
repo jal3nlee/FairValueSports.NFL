@@ -9,29 +9,26 @@ from supabase import create_client, Client
 from pathlib import Path
 import streamlit as st
 
-LOGO_PATH = "assets/logo.png"        # add this file to your repo
-FAVICON_PATH = "assets/favicon.png"  # add this file to your repo
+# --- Branding: favicon + logo (MUST be first Streamlit call) ---
+from pathlib import Path
+import streamlit as st
 
-# Must be the first Streamlit call:
+LOGO_PATH = "assets/logo.png"
+FAVICON_PATH = "assets/favicon.png"
+
 st.set_page_config(
     page_title="Fair Value Sports",
-    page_icon=(FAVICON_PATH if Path(FAVICON_PATH).exists() else "🏈"),
+    page_icon=(FAVICON_PATH if Path(FAVICON_PATH).is_file() else "🏈"),
     layout="wide"
 )
 
-# Header logo (fallback to text if file missing)
-if Path(LOGO_PATH).exists():
+# Optional: show logo in header + sidebar (only if file exists)
+if Path(LOGO_PATH).is_file():
     st.image(LOGO_PATH, width=200)
-else:
-    st.title("Fair Value Sports")
-
-# Sidebar logo (optional)
 with st.sidebar:
-    if Path(LOGO_PATH).exists():
+    if Path(LOGO_PATH).is_file():
         st.image(LOGO_PATH, width=160)
-    else:
-        st.markdown("**Fair Value Sports**")
-# --- end branding snippet ---
+# --- end branding ---
 
 # ========= Auth (Supabase) =========
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
