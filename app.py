@@ -7,52 +7,45 @@ from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
 
-# ===== BRANDING (favicon + logo) with diagnostics =====
+# ===== BRANDING (supports assets/ and .streamlit/assets) =====
 from pathlib import Path
 from PIL import Image
-import streamlit as st, os
+import streamlit as st
 
 ROOT = Path(__file__).parent.resolve()
-ASSETS = ROOT / "assets"
-LOGO_PATH = ASSETS / "logo.png"
-FAVICON_PATH = ASSETS / "favicon.png"
+ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
 
-# --- quick diagnostics (temporary; remove once it works) ---
-st.caption(f"ROOT: {ROOT}")
-try:
-    st.caption("Root files: " + ", ".join(sorted(os.listdir(ROOT))[:20]))
-except Exception:
-    pass
-if ASSETS.exists():
-    try:
-        st.caption("Assets: " + ", ".join(sorted(os.listdir(ASSETS))[:20]))
-    except Exception:
-        pass
-st.caption(f"Logo exists: {LOGO_PATH.is_file()}  |  Favicon exists: {FAVICON_PATH.is_file()}")
+def find_asset(name: str) -> Path | None:
+    for d in ASSET_DIRS:
+        p = d / name
+        if p.is_file():
+            return p
+    return None
 
-# Load favicon image if present (helps with browser cache)
+LOGO_PATH = find_asset("logo.png")
+FAVICON_PATH = find_asset("favicon.png")
+
 favicon_img = None
-if FAVICON_PATH.is_file():
+if FAVICON_PATH:
     try:
         favicon_img = Image.open(FAVICON_PATH)
     except Exception:
         favicon_img = None
 
-# MUST be the first Streamlit call
+# MUST be first Streamlit call
 st.set_page_config(
-    page_title="Fair Value Sports • v3",  # small change helps bust favicon cache
+    page_title="Fair Value Sports • v4",
     page_icon=(favicon_img if favicon_img else "🏈"),
     layout="wide",
 )
 
-# Show logos (fallback to text if missing)
-if LOGO_PATH.is_file():
+# Show logos (fallback if missing)
+if LOGO_PATH:
     st.image(str(LOGO_PATH), width=200)
 else:
-    st.warning("Logo not found at assets/logo.png")
-
+    st.warning("Logo not found (looked in assets/ and .streamlit/assets)")
 with st.sidebar:
-    if LOGO_PATH.is_file():
+    if LOGO_PATH:
         st.image(str(LOGO_PATH), width=160)
     else:
         st.write("Fair Value Sports")
