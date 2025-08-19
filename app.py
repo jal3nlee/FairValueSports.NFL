@@ -7,25 +7,56 @@ from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
 
-# =======================
-# Branding (favicon + logo)
-# =======================
-LOGO_PATH = "assets/logo.png"
-FAVICON_PATH = "assets/favicon.png"
+# ===== BRANDING (favicon + logo) with diagnostics =====
+from pathlib import Path
+from PIL import Image
+import streamlit as st, os
 
-# MUST be the first Streamlit call:
+ROOT = Path(__file__).parent.resolve()
+ASSETS = ROOT / "assets"
+LOGO_PATH = ASSETS / "logo.png"
+FAVICON_PATH = ASSETS / "favicon.png"
+
+# --- quick diagnostics (temporary; remove once it works) ---
+st.caption(f"ROOT: {ROOT}")
+try:
+    st.caption("Root files: " + ", ".join(sorted(os.listdir(ROOT))[:20]))
+except Exception:
+    pass
+if ASSETS.exists():
+    try:
+        st.caption("Assets: " + ", ".join(sorted(os.listdir(ASSETS))[:20]))
+    except Exception:
+        pass
+st.caption(f"Logo exists: {LOGO_PATH.is_file()}  |  Favicon exists: {FAVICON_PATH.is_file()}")
+
+# Load favicon image if present (helps with browser cache)
+favicon_img = None
+if FAVICON_PATH.is_file():
+    try:
+        favicon_img = Image.open(FAVICON_PATH)
+    except Exception:
+        favicon_img = None
+
+# MUST be the first Streamlit call
 st.set_page_config(
-    page_title="Fair Value Sports",
-    page_icon=(FAVICON_PATH if Path(FAVICON_PATH).is_file() else "🏈"),
-    layout="wide"
+    page_title="Fair Value Sports • v3",  # small change helps bust favicon cache
+    page_icon=(favicon_img if favicon_img else "🏈"),
+    layout="wide",
 )
 
-# Header + Sidebar logo (optional)
-if Path(LOGO_PATH).is_file():
-    st.image(LOGO_PATH, width=200)
+# Show logos (fallback to text if missing)
+if LOGO_PATH.is_file():
+    st.image(str(LOGO_PATH), width=200)
+else:
+    st.warning("Logo not found at assets/logo.png")
+
 with st.sidebar:
-    if Path(LOGO_PATH).is_file():
-        st.image(LOGO_PATH, width=160)
+    if LOGO_PATH.is_file():
+        st.image(str(LOGO_PATH), width=160)
+    else:
+        st.write("Fair Value Sports")
+# ===== END BRANDING =====
 
 # =======================
 # Auth (Supabase)
