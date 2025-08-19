@@ -1,1 +1,9 @@
+# .streamlit/config.toml
+[theme]
+base = "light"
+primaryColor = "#4A79BD"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FC"
+textColor = "#231F20"
+font = "sans serif"   # Streamlit supports: "sans serif" | "serif" | "monospace"
 
