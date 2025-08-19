@@ -264,7 +264,7 @@ def run_app():
 
     cons = compute_consensus_fair_probs(df_books)
     bests = best_prices(df_books)
-    merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner"])
+    merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
 
     # Rows
     rows = []
