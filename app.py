@@ -5,6 +5,34 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 
+# --- Branding: favicon + logo (place this at the very top of app.py) ---
+from pathlib import Path
+import streamlit as st
+
+LOGO_PATH = "assets/logo.png"        # add this file to your repo
+FAVICON_PATH = "assets/favicon.png"  # add this file to your repo
+
+# Must be the first Streamlit call:
+st.set_page_config(
+    page_title="Fair Value Sports",
+    page_icon=(FAVICON_PATH if Path(FAVICON_PATH).exists() else "🏈"),
+    layout="wide"
+)
+
+# Header logo (fallback to text if file missing)
+if Path(LOGO_PATH).exists():
+    st.image(LOGO_PATH, width=200)
+else:
+    st.title("Fair Value Sports")
+
+# Sidebar logo (optional)
+with st.sidebar:
+    if Path(LOGO_PATH).exists():
+        st.image(LOGO_PATH, width=160)
+    else:
+        st.markdown("**Fair Value Sports**")
+# --- end branding snippet ---
+
 # ========= Auth (Supabase) =========
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
