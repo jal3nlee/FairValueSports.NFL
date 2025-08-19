@@ -43,10 +43,9 @@ def fmt_date_est_str(iso_s: str):
     dt = parse_iso_dt_utc(iso_s)
     if not dt: return None
     et = dt.astimezone(EASTERN)
-    dow = et.strftime("%a")  # Thu
-    # portable mm/dd (avoid %-m on Windows)
-    md = f"{et.month}/{et.day}"
-    tm = et.strftime("%I:%M %p").lstrip("0")
+    dow = et.strftime("%a")              # e.g., Thu
+    md  = f"{et.month}/{et.day}"         # e.g., 8/14
+    tm  = et.strftime("%I:%M %p").lstrip("0")  # e.g., 7:30 PM
     return f"{dow} {md} {tm} ET"
 
 # ---------- HARD-CODED NFL WEEK CALENDAR ----------
@@ -166,12 +165,15 @@ else:
                      f"{window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC") if week_index == 0 \
                     else (f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
 
-# Inputs (no EV filter now)
+# Inputs
 c1, c2 = st.columns(2)
 with c1:
     weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
 with c2:
     kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+
+# TEMP: show-all toggle (if OFF, keep only EV% >= 0)
+show_all = st.checkbox("Show all games (ignore EV filter)", value=True)
 
 # Fetch odds
 params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
@@ -197,7 +199,7 @@ cons = compute_consensus_fair_probs(df_books)
 bests = best_prices(df_books)
 merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
 
-# Build output rows (no EV filter; show all)
+# Build output rows (initially include all)
 rows = []
 for _, r in merged.iterrows():
     date_str = fmt_date_est_str(r.get("commence_time"))
@@ -212,9 +214,9 @@ for _, r in merged.iterrows():
             "Date": date_str,
             "Game": game_label,
             "Pick": r["home_team"],
-            "Best Odds": price,                  # keep numeric for math; format later with + sign
+            "Best Odds": price,                  # numeric; we'll pretty-print with + later
             "Best Book": r.get("home_book"),
-            "Implied Probability": fair_p,       # renamed from Fair Prob
+            "Implied Probability": fair_p,       # decimal now; show as % later
             "EV%": ev_pct,
             "Kelly %": kelly*100.0,
             "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
@@ -241,13 +243,18 @@ df = pd.DataFrame(rows)
 if df.empty:
     st.info("No sides available."); st.stop()
 
-# Sort (keep EV-first)
+# Apply temp EV filter if requested (EV% >= 0)
+if not show_all:
+    df = df[df["EV%"] >= 0].reset_index(drop=True)
+    if df.empty:
+        st.info("No games meet EV% ≥ 0 with this window."); st.stop()
+
+# Sort
 df = df.sort_values(["EV%","Implied Probability"], ascending=[False, False]).reset_index(drop=True)
 
-# Pretty formatting:
+# Pretty formatting for display
 show = df.copy()
 
-# + sign on positive odds -> string column
 def fmt_odds(o):
     try:
         o = int(o)
@@ -256,11 +263,7 @@ def fmt_odds(o):
         return str(o)
 
 show["Best Odds"] = show["Best Odds"].map(fmt_odds)
-
-# Capitalize sportsbook names (they should already be nice via 'title')
 show["Best Book"] = show["Best Book"].astype(str)
-
-# Probabilities / percents formatting
 show["Implied Probability"] = show["Implied Probability"].map(lambda x: f"{x*100:.1f}%")
 show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
 
