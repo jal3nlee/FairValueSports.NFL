@@ -107,8 +107,8 @@ def best_prices(df_evt_books: pd.DataFrame):
     return pd.merge(home_best, away_best, on=["event_id","home_team","away_team"], how="outer")
 
 # ---------- UI ----------
-st.set_page_config(page_title="NFL Value (Kelly)", page_icon="🏈", layout="wide")
-st.title("🏈 NFL Moneyline — Market EV + Kelly")
+st.set_page_config(page_title="Fair Value Sports - NFL", page_icon="🏈", layout="wide")
+st.title("NFL Market EV Model")
 
 if not API_KEY:
     st.error("Missing ODDS_API_KEY environment variable."); st.stop()
