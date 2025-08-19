@@ -2,9 +2,12 @@ import os, math, requests
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 API_BASE = "https://api.the-odds-api.com/v4"
 API_KEY  = os.getenv("ODDS_API_KEY", "")
+
+EASTERN = ZoneInfo("America/New_York")
 
 # ---------- helpers ----------
 def american_to_implied_prob(odds):
@@ -36,13 +39,19 @@ def parse_iso_dt_utc(iso_s: str):
     try: return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
     except Exception: return None
 
-def fmt_date_utc_str(iso_s: str):
+def fmt_date_est_str(iso_s: str):
     dt = parse_iso_dt_utc(iso_s)
-    return dt.strftime('%Y-%m-%d %H:%M UTC') if dt else None
+    if not dt: return None
+    et = dt.astimezone(EASTERN)
+    dow = et.strftime("%a")  # Thu
+    # portable mm/dd (avoid %-m on Windows)
+    md = f"{et.month}/{et.day}"
+    tm = et.strftime("%I:%M %p").lstrip("0")
+    return f"{dow} {md} {tm} ET"
 
 # ---------- HARD-CODED NFL WEEK CALENDAR ----------
 def nfl_week1_kickoff_thursday_utc(year: int) -> datetime:
-    # Week 1 = Sep 4 (00:00 UTC) for the given year
+    """Hard-code Week 1 kickoff as Sep 4 (00:00 UTC) for the given year."""
     return datetime(year, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
 
 def nfl_week_window_utc(week_index: int, now_utc: datetime):
@@ -66,24 +75,17 @@ def infer_current_week_index(now_utc: datetime) -> int:
     weeks = (now_utc - wk1).days // 7 + 1
     return max(1, min(19, weeks))
 
-# ---------- detect active sport key (preseason vs regular) ----------
-def resolve_sport_key(week_index: int) -> str:
-    """Prefer preseason key for week 0 IF it's active; else fall back to regular NFL."""
-    if week_index != 0:
-        return "americanfootball_nfl"
-    # Week 0: try preseason, fall back if not active/available
-    try:
-        r = requests.get(f"{API_BASE}/sports", params={"apiKey": API_KEY}, timeout=15)
-        r.raise_for_status()
-        sports = r.json() if isinstance(r.json(), list) else []
-        keys = {s.get("key") for s in sports}
-        if "americanfootball_nfl_preseason" in keys:
-            return "americanfootball_nfl_preseason"
-    except Exception:
-        pass
-    return "americanfootball_nfl"
+def sport_key_for_week(week_index: int) -> str:
+    return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
 
 # ---------- odds shaping ----------
+def pretty_book_title(bm: dict) -> str:
+    # Prefer API's 'title'; fallback to cleaned 'key'
+    title = bm.get("title")
+    if title: return title
+    key = (bm.get("key") or "").replace("_", " ").title()
+    return key or "Sportsbook"
+
 def build_market(events, selected_books=None):
     rows = []
     for ev in events:
@@ -100,7 +102,8 @@ def build_market(events, selected_books=None):
             if price_home is None and price_away is None: continue
             rows.append({
                 "event_id": eid, "home_team": home, "away_team": away,
-                "book": bm.get("key"), "home_price": price_home, "away_price": price_away,
+                "book": pretty_book_title(bm),  # use nice title
+                "home_price": price_home, "away_price": price_away,
                 "commence_time": t0
             })
     return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -145,32 +148,30 @@ if not API_KEY:
 
 region = "us"
 
-# Dropdown: Today / Week X (X inferred)
+# Dropdown with exactly: Today, Week X (X = current hard-coded week index)
 now = datetime.now(timezone.utc)
 current_week = infer_current_week_index(now)
-window_options = ["Today", f"Week {current_week}"]
-window_choice = st.selectbox("Window", window_options, index=1)
+window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
 
 if window_choice == "Today":
     window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
-    week_index   = 0 if current_week == 0 else current_week
+    sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
+    caption_label = f"Today ({window_start.strftime('%Y-%m-%d')} UTC)"
 else:
     week_index   = current_week
     window_start, window_end = nfl_week_window_utc(week_index, now)
+    sport_key    = sport_key_for_week(week_index)
+    caption_label = ("Week 0 (before Sep 4) — "
+                     f"{window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC") if week_index == 0 \
+                    else (f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
 
-sport_key = resolve_sport_key(week_index)
-
-# Inputs
-c1, c2, c3 = st.columns(3)
+# Inputs (no EV filter now)
+c1, c2 = st.columns(2)
 with c1:
     weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
 with c2:
     kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
-with c3:
-    min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5)  # default 0 to help debug
-
-show_all = st.checkbox("Show all games (ignore EV filter)", value=True)
 
 # Fetch odds
 params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
@@ -179,18 +180,13 @@ try:
 except Exception as e:
     st.error(f"API error: {e}"); st.stop()
 
-# ---- Debug HUD: counts and sport key
-st.caption(f"Debug: sport_key = **{sport_key}**  |  fetched events = **{len(events) if isinstance(events, list) else 0}**")
-
 if not isinstance(events, list) or not events:
-    st.warning("No events returned from the API."); st.stop()
+    st.warning("No events returned."); st.stop()
 
 # Filter to chosen window
 events = [ev for ev in events if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end]
-st.caption(f"Debug: in-window events = **{len(events)}**  |  window = {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
-
 if not events:
-    st.info("No NFL games in the selected window."); st.stop()
+    st.info(f"No NFL games in the selected window ({caption_label})."); st.stop()
 
 # Build -> devig -> best
 df_books = build_market(events, selected_books=None)
@@ -201,57 +197,83 @@ cons = compute_consensus_fair_probs(df_books)
 bests = best_prices(df_books)
 merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
 
-# Rows
+# Build output rows (no EV filter; show all)
 rows = []
 for _, r in merged.iterrows():
-    date_str = fmt_date_utc_str(r.get("commence_time"))
-    event_label = f"{r['home_team']} vs {r['away_team']}"
+    date_str = fmt_date_est_str(r.get("commence_time"))
+    game_label = f"{r['home_team']} vs {r['away_team']}"
 
-    # Home
+    # Home side
     if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
         fair_p, price = float(r["home_fair"]), int(r["home_price"])
         ev_pct = expected_value_pct(fair_p, price)
         kelly = kelly_fraction(fair_p, price)
-        if show_all or ev_pct >= float(min_ev):
-            rows.append({
-                "Date": date_str, "Event": event_label, "Pick": r["home_team"], "Side": "Home",
-                "Best Odds": price, "Best Book": r.get("home_book"),
-                "Fair Prob": fair_p, "EV%": ev_pct, "Kelly %": kelly*100.0,
-                "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
-            })
+        rows.append({
+            "Date": date_str,
+            "Game": game_label,
+            "Pick": r["home_team"],
+            "Best Odds": price,                  # keep numeric for math; format later with + sign
+            "Best Book": r.get("home_book"),
+            "Implied Probability": fair_p,       # renamed from Fair Prob
+            "EV%": ev_pct,
+            "Kelly %": kelly*100.0,
+            "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
+        })
 
-    # Away
+    # Away side
     if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
         fair_p, price = float(r["away_fair"]), int(r["away_price"])
         ev_pct = expected_value_pct(fair_p, price)
         kelly = kelly_fraction(fair_p, price)
-        if show_all or ev_pct >= float(min_ev):
-            rows.append({
-                "Date": date_str, "Event": event_label, "Pick": r["away_team"], "Side": "Away",
-                "Best Odds": price, "Best Book": r.get("away_book"),
-                "Fair Prob": fair_p, "EV%": ev_pct, "Kelly %": kelly*100.0,
-                "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
-            })
+        rows.append({
+            "Date": date_str,
+            "Game": game_label,
+            "Pick": r["away_team"],
+            "Best Odds": price,
+            "Best Book": r.get("away_book"),
+            "Implied Probability": fair_p,
+            "EV%": ev_pct,
+            "Kelly %": kelly*100.0,
+            "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
+        })
 
 df = pd.DataFrame(rows)
 if df.empty:
-    st.info("Data loaded, but no rows passed the EV filter. Toggle “Show all games” to inspect."); st.stop()
+    st.info("No sides available."); st.stop()
 
-df = df.sort_values(["EV%","Fair Prob"], ascending=[False, False]).reset_index(drop=True)
+# Sort (keep EV-first)
+df = df.sort_values(["EV%","Implied Probability"], ascending=[False, False]).reset_index(drop=True)
 
-# Header + table
-label = "Today" if window_choice == "Today" else f"Week {week_index}"
-st.caption(f"Window: {label} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
-st.subheader("Games & EV")
-
+# Pretty formatting:
 show = df.copy()
-show["Fair Prob"] = show["Fair Prob"].map(lambda x: f"{x:.3f}")
+
+# + sign on positive odds -> string column
+def fmt_odds(o):
+    try:
+        o = int(o)
+        return f"+{o}" if o > 0 else str(o)
+    except Exception:
+        return str(o)
+
+show["Best Odds"] = show["Best Odds"].map(fmt_odds)
+
+# Capitalize sportsbook names (they should already be nice via 'title')
+show["Best Book"] = show["Best Book"].astype(str)
+
+# Probabilities / percents formatting
+show["Implied Probability"] = show["Implied Probability"].map(lambda x: f"{x*100:.1f}%")
 show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
+
+# Render
+st.caption(f"Window: {caption_label}")
+st.subheader("Games & EV")
 st.dataframe(
-    show[["Date","Event","Pick","Side","Best Odds","Best Book","Fair Prob","EV%","Kelly %","Stake ($)"]],
-    use_container_width=True, hide_index=True,
+    show[["Date","Game","Pick","Best Odds","Best Book","Implied Probability","EV%","Kelly %","Stake ($)"]],
+    use_container_width=True,
+    hide_index=True,
 )
 
+# Totals
 total_stake = float(df["Stake ($)"].sum())
 util_pct = 100.0 * (total_stake / weekly_bankroll) if weekly_bankroll > 0 else 0.0
 color = "green" if util_pct < 50 else ("orange" if util_pct < 70 else "red")
