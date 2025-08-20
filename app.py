@@ -19,6 +19,13 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+# Reattach session tokens if we have them in Streamlit state
+if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"):
+    supabase.auth.set_session(
+        access_token=st.session_state.sb_access_token,
+        refresh_token=st.session_state.sb_refresh_token,
+    )
+
 # ===== BRANDING (clean, no debug) =====
 from pathlib import Path
 from PIL import Image
