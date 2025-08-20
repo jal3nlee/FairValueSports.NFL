@@ -7,85 +7,58 @@ from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
 
-# ===== BRANDING (auto-pick newest favicon + robust paths + diagnostics) =====
+# ===== BRANDING (clean, no debug) =====
 from pathlib import Path
 from PIL import Image
-import streamlit as st, hashlib, os
+import streamlit as st
 
 ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
 
-def find_asset(name: str) -> Path | None:
+def find_asset(name: str):
     for d in ASSET_DIRS:
         p = d / name
         if p.is_file():
             return p
     return None
 
-def newest_favicon() -> Path | None:
-    # pick the most recently modified file matching favicon*.png in either assets dir
-    cand_paths = []
+def newest_favicon():
+    cands = []
     for d in ASSET_DIRS:
         if d.is_dir():
-            cand_paths += list(d.glob("favicon*.png"))
-    if not cand_paths:
+            cands += list(d.glob("favicon*.png"))
+    if not cands:
         return None
-    cand_paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return cand_paths[0]
+    return max(cands, key=lambda p: p.stat().st_mtime)
 
 LOGO_PATH = find_asset("logo.png")
-FAVICON_PATH = newest_favicon()  # <— auto-pick newest favicon*.png
+FAVICON_PATH = newest_favicon()
 
-# Load favicon image (reliable for Streamlit + helps bust cache)
 favicon_img = None
-if FAVICON_PATH and FAVICON_PATH.is_file():
+if FAVICON_PATH:
     try:
         favicon_img = Image.open(FAVICON_PATH)
     except Exception:
         favicon_img = None
 
-# MUST be first Streamlit call (bump title to bust browser cache)
 st.set_page_config(
     page_title="Fair Value Sports",
     page_icon=(favicon_img if favicon_img else "🏈"),
     layout="wide",
 )
 
-# Diagnostics (TEMPORARY — remove after it works)
-root_list = ", ".join(sorted(os.listdir(ROOT))[:20])
-assets_list = []
-for d in ASSET_DIRS:
-    try:
-        if d.exists():
-            assets_list.append(f"{d.name}: " + ", ".join(sorted(os.listdir(d))[:20]))
-    except Exception:
-        pass
+HEADER_W = 560
+SIDEBAR_W = 320
 
-icon_hash = ""
-try:
-    if FAVICON_PATH and FAVICON_PATH.is_file():
-        icon_hash = hashlib.md5(FAVICON_PATH.read_bytes()).hexdigest()[:10]
-except Exception:
-    pass
-
-st.caption(f"ROOT: {ROOT}")
-st.caption(f"Root files: {root_list}")
-st.caption(" | ".join(assets_list) or "No assets dirs found")
-st.caption(f"Logo path: {LOGO_PATH}  |  Favicon path: {FAVICON_PATH}  |  md5: {icon_hash or 'n/a'}")
-
-# Show logos (fallback if missing)
-if LOGO_PATH and LOGO_PATH.is_file():
-    st.image(str(LOGO_PATH), width=560)   # header
-else:
-    st.warning("Logo not found. Expected 'assets/logo.png' or '.streamlit/assets/logo.png'.")
+if LOGO_PATH:
+    st.image(str(LOGO_PATH), width=HEADER_W)
 
 with st.sidebar:
-    if LOGO_PATH and LOGO_PATH.is_file():
-        st.image(str(LOGO_PATH), width=320)  # sidebar
+    if LOGO_PATH:
+        st.image(str(LOGO_PATH), width=SIDEBAR_W)
     else:
         st.write("Fair Value Sports")
 # ===== END BRANDING =====
-
 
 # =======================
 # Auth (Supabase)
