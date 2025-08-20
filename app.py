@@ -7,6 +7,18 @@ from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
 
+# =======================
+# Auth (Supabase) — stable, single-submit forms
+# =======================
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
+    st.stop()
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
 # ===== BRANDING (clean, no debug) =====
 from pathlib import Path
 from PIL import Image
@@ -144,19 +156,6 @@ with st.sidebar.expander("Disclaimer", expanded=False):
 Not to be used as financial or betting advice.
         """
     )
-
-
-# =======================
-# Auth (Supabase) — stable, single-submit forms
-# =======================
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
-    st.stop()
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ---- Session state priming ----
 st.session_state.setdefault("sb_session", None)
