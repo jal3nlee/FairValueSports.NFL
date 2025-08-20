@@ -443,13 +443,14 @@ def run_app():
     # Inputs
     c1, c2, c3 = st.columns(3)
     with c1:
-        weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
+        weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0),  help="Total budget for the week."
     with c2:
-        kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+        kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05),   help="Scales bet size."
     with c3:
-        min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5)
+        min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5),  help="Filters low-value bets."
 
     show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
+  
 
     # Fetch odds
     params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
