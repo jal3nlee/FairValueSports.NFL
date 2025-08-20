@@ -40,13 +40,12 @@ st.set_page_config(
 )
 
 # Show logos (fallback if missing)
-if LOGO_PATH:
-    st.image(str(LOGO_PATH), width=200)
-else:
-    st.warning("Logo not found (looked in assets/ and .streamlit/assets)")
+if Path(LOGO_PATH).is_file():
+    st.image(str(LOGO_PATH), width=400)   # was 200
+
 with st.sidebar:
-    if LOGO_PATH:
-        st.image(str(LOGO_PATH), width=160)
+    if Path(LOGO_PATH).is_file():
+        st.image(str(LOGO_PATH), width=240)  # was 160
     else:
         st.write("Fair Value Sports")
 # ===== END BRANDING =====
