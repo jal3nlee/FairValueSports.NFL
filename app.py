@@ -87,8 +87,9 @@ with st.sidebar.expander("Glossary", expanded=False):
         """
 **EV% (Expected Value %)**  
 Represents the percentage edge you have over the market.  
-- Positive EV% = bet has a theoretical advantage.  
-- Negative EV% = bet is disadvantageous in the long run.  
+- Betting only positive EV% plays with a Kelly factor is mathematically profitable long-term, **BUT** only if the model’s probabilities are accurate and you can withstand short-term variance. 
+- Conservative bettors typically only take bets with +2-3% EV or higher, focusing on fewer plays with stronger edges and lower variance.
+- Aggressive bettors may take bets with +0.5-1% EV or higher, accepting more volume and variance in exchange for higher potential long-run growth.
 
 **Kelly Factor**  
 A bankroll management formula that adjusts bet size based on edge and probability.  
