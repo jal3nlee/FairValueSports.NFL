@@ -99,21 +99,43 @@ A bankroll management formula that adjusts bet size based on edge and probabilit
         """
     )
 
-# --- Sidebar Feedback ---
-with st.sidebar:
-    with st.form("feedback_form", clear_on_submit=True):
-        feedback_text = st.text_area("Share your thoughts, ideas, or issues:", key="feedback_input")
-        submitted = st.form_submit_button("Submit Feedback")
+# --- Sidebar Feedback (requires login) ---
+with st.sidebar.expander("💬 Feedback", expanded=False):
+    user = None
+    try:
+        user = getattr(st.session_state.get("sb_session", None), "user", None)
+    except Exception:
+        user = None
 
-    if submitted:
-        if feedback_text.strip():
-            # TODO: send to Supabase / email / etc.
-            st.success("Thanks for your feedback!")
-            # No manual session_state clearing needed; the form clears the textarea.
-            # If you need a rerun (e.g., to refresh a list), call:
-            # st.rerun()
-        else:
-            st.warning("Please enter some feedback before submitting.")
+    if not user:
+        st.info("You must be signed in to leave feedback.")
+    else:
+        with st.form("feedback_form", clear_on_submit=True):
+            full_name = (user.user_metadata or {}).get("full_name") or (user.user_metadata or {}).get("name") or ""
+            email_addr = getattr(user, "email", "") or (user.user_metadata or {}).get("email", "")
+
+            st.markdown(f"**Submitting as:** {full_name or 'Unknown'}  \n**Email:** {email_addr or 'Unknown'}")
+
+            feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
+            submitted = st.form_submit_button("Submit Feedback")
+
+        if submitted:
+            txt = (feedback_text or "").strip()
+            if not txt:
+                st.warning("Please enter feedback before submitting.")
+            else:
+                try:
+                    payload = {
+                        "message": txt,
+                        "name": full_name.strip() or None,
+                        "email": (email_addr or "").strip() or None,
+                        "user_id": user.id,
+                    }
+                    supabase.table("feedback").insert(payload).execute()
+                    st.success("Thanks for your feedback!")
+                except Exception as e:
+                    st.error(f"Error saving feedback: {e}")
+
 
 with st.sidebar.expander("Disclaimer", expanded=False):
     st.markdown(
