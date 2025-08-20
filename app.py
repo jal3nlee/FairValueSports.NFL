@@ -94,7 +94,7 @@ def auth_view():
 
     # --- Create account (with name) ---
     with tabs[1]:
-        full_name = st.text_input("Full name", key="signup_name", placeholder="Jane Doe")
+        full_name = st.text_input("Name", key="signup_name")
         email2 = st.text_input("Email", key="signup_email")
         pw2 = st.text_input("Password", type="password", key="signup_pw")
 
