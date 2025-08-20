@@ -175,7 +175,7 @@ def auth_view():
                 if sess:
                     _store_session(sess)
                     st.success("Signed in.")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
             except Exception as e:
