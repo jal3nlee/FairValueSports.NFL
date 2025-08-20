@@ -476,7 +476,7 @@ show_all = st.checkbox(
     help="Tick to display every matchup regardless of EV%."
 )
 
-    show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
+show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
   
 
     # Fetch odds
