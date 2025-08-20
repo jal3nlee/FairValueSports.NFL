@@ -76,7 +76,6 @@ if "sb_session" not in st.session_state:
     st.session_state.sb_session = None
 
 def auth_view():
-    st.title("Fair Value Sports")
     tabs = st.tabs(["Sign in", "Create account"])
 
     with tabs[0]:
