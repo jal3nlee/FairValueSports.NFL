@@ -100,7 +100,7 @@ A bankroll management formula that adjusts bet size based on edge and probabilit
     )
 
 # --- Sidebar Feedback (requires login) ---
-with st.sidebar.expander("💬 Feedback", expanded=False):
+with st.sidebar.expander("Feedback", expanded=False):
     user = None
     try:
         user = getattr(st.session_state.get("sb_session", None), "user", None)
