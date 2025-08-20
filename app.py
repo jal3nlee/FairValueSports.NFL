@@ -374,7 +374,7 @@ def run_app():
     if not API_KEY:
         st.error("Missing ODDS_API_KEY environment variable."); st.stop()
 
-    st.title("NFL Market EV Model")
+    st.title("NFL Expected Value Model")
     region = "us"
 
     # Window dropdown
