@@ -78,31 +78,51 @@ if "sb_session" not in st.session_state:
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
 
+    # --- Sign in ---
     with tabs[0]:
         email = st.text_input("Email", key="signin_email")
         password = st.text_input("Password", type="password", key="signin_pw")
-        if st.button("Sign in"):
+        if st.button("Sign in", key="btn_signin"):
             try:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                res = supabase.auth.sign_in_with_password(
+                    {"email": email.strip(), "password": password}
+                )
                 st.session_state.sb_session = res.session
                 st.experimental_rerun()
-            except Exception:
+            except Exception as e:
                 st.error("Sign-in failed. Check your email/password or verify your email.")
 
+    # --- Create account (with name) ---
     with tabs[1]:
+        full_name = st.text_input("Full name", key="signup_name", placeholder="Jane Doe")
         email2 = st.text_input("Email", key="signup_email")
         pw2 = st.text_input("Password", type="password", key="signup_pw")
-        if st.button("Create account"):
-            try:
-                supabase.auth.sign_up({"email": email2, "password": pw2})
-                st.success("Account created. Check your email to verify, then sign in.")
-            except Exception:
-                st.error("Sign-up failed. Try a different email or password.")
+
+        if st.button("Create account", key="btn_signup"):
+            if not full_name.strip():
+                st.warning("Please enter your full name.")
+            elif not email2 or not pw2:
+                st.warning("Email and password are required.")
+            else:
+                try:
+                    # Store name in user_metadata at signup
+                    res = supabase.auth.sign_up(
+                        {
+                            "email": email2.strip(),
+                            "password": pw2,
+                            "options": {"data": {"full_name": full_name.strip()}},
+                        }
+                    )
+                    # For email-confirmation flows, session will be None until the user clicks the link
+                    st.success("Account created. Check your email to verify, then sign in.")
+                except Exception as e:
+                    st.error("Sign-up failed. Try a different email or password.")
 
 def require_auth():
     if st.session_state.sb_session is None:
         auth_view()
         st.stop()
+
 
 # =======================
 # NFL app config
