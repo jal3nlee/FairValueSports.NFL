@@ -60,10 +60,13 @@ with st.sidebar:
         st.write("Fair Value Sports")
 # ===== END BRANDING =====
 
-# --- Sidebar: How to & Disclaimer ---
-st.divider()
+# Make sure the sidebar opens by default (optional)
+st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 
-with st.expander("📘 How to use", expanded=True):
+# --- Sidebar: How to & Disclaimer ---
+st.sidebar.divider()
+
+with st.sidebar.expander("📘 How to use", expanded=True):
     st.markdown(
         """
 1. **Pick a Window**: choose **Today** or **NFL Week X** from the dropdown.
@@ -79,7 +82,7 @@ with st.expander("📘 How to use", expanded=True):
         """
     )
 
-with st.expander("⚠️ Disclaimer", expanded=False):
+with st.sidebar.expander("⚠️ Disclaimer", expanded=False):
     st.markdown(
         """
 **Fair Value Sports** is for **information and entertainment** only.  
@@ -88,6 +91,7 @@ Wager responsibly and only where legal. **21+** (or as required by your jurisdic
 Past performance does **not** guarantee future results.
         """
     )
+
 
 # =======================
 # Auth (Supabase) — stable, single-submit forms
