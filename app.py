@@ -63,10 +63,10 @@ with st.sidebar:
 # Make sure the sidebar opens by default (optional)
 st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 
-# --- Sidebar: How to & Disclaimer ---
+# --- Sidebar ---
 st.sidebar.divider()
 
-with st.sidebar.expander("📘 How to use", expanded=False):
+with st.sidebar.expander("How to use", expanded=False):
     st.markdown(
         """
 1. **Pick a Window**: choose **Today** or **NFL Week X** from the dropdown.
@@ -81,7 +81,24 @@ with st.sidebar.expander("📘 How to use", expanded=False):
         """
     )
 
-with st.sidebar.expander("⚠️ Disclaimer", expanded=False):
+# --- Sidebar Glossary ---
+with st.sidebar.expander("Glossary", expanded=False):
+    st.markdown(
+        """
+**EV% (Expected Value %)**  
+Represents the percentage edge you have over the market.  
+- Positive EV% = bet has a theoretical advantage.  
+- Negative EV% = bet is disadvantageous in the long run.  
+
+**Kelly Factor**  
+A bankroll management formula that adjusts bet size based on edge and probability.  
+- **1.0** = full Kelly (aggressive, max growth but higher risk).  
+- **0.5** = half Kelly (more conservative, balances growth & variance).  
+- Lower values scale down risk even further.  
+        """
+    )
+
+with st.sidebar.expander("Disclaimer", expanded=False):
     st.markdown(
         """
 **Fair Value Sports** is for **education and entertainment** only.  
