@@ -66,29 +66,26 @@ st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 # --- Sidebar: How to & Disclaimer ---
 st.sidebar.divider()
 
-with st.sidebar.expander("📘 How to use", expanded=True):
+with st.sidebar.expander("📘 How to use", expanded=False):
     st.markdown(
         """
 1. **Pick a Window**: choose **Today** or **NFL Week X** from the dropdown.
 2. **Set inputs**:
    - **Weekly Bankroll ($)** — your total budget for the week.
    - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
-   - **Minimum EV%** — hide picks below this expected value.
+   - **Minimum EV%** — filter picks below this expected value.
 3. **Review the table**:
    - **Implied Probability** = de-vigged market consensus.
    - **EV%** = edge versus best available odds.
-   - **Stake ($)** = `weekly_bankroll × kelly_factor × Kelly fraction`.
-4. (Optional) Toggle **Show all games** to see every matchup, even if EV% < threshold.
+   - **Stake ($)** = how much you should bet based on Kelly Factor and Weekly Bankroll inputs.
         """
     )
 
 with st.sidebar.expander("⚠️ Disclaimer", expanded=False):
     st.markdown(
         """
-**Fair Value Sports** is for **information and entertainment** only.  
-Nothing here is financial or betting advice. **No guarantees of profit**.  
-Wager responsibly and only where legal. **21+** (or as required by your jurisdiction).  
-Past performance does **not** guarantee future results.
+**Fair Value Sports** is for **education and entertainment** only.  
+Not to be used as financial or betting advice.
         """
     )
 
