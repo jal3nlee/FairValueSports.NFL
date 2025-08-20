@@ -60,6 +60,36 @@ with st.sidebar:
         st.write("Fair Value Sports")
 # ===== END BRANDING =====
 
+# --- Sidebar: How to & Disclaimer ---
+st.divider()
+
+with st.expander("📘 How to use", expanded=True):
+    st.markdown(
+        """
+1. **Pick a Window**: choose **Today** or **NFL Week X** from the dropdown.
+2. **Set inputs**:
+   - **Weekly Bankroll ($)** — your total budget for the week.
+   - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
+   - **Minimum EV%** — hide picks below this expected value.
+3. **Review the table**:
+   - **Implied Probability** = de-vigged market consensus.
+   - **EV%** = edge versus best available odds.
+   - **Stake ($)** = `weekly_bankroll × kelly_factor × Kelly fraction`.
+4. (Optional) Toggle **Show all games** to see every matchup, even if EV% < threshold.
+        """
+    )
+
+with st.expander("⚠️ Disclaimer", expanded=False):
+    st.markdown(
+        """
+**Fair Value Sports** is for **information and entertainment** only.  
+Nothing here is financial or betting advice. **No guarantees of profit**.  
+Wager responsibly and only where legal. **21+** (or as required by your jurisdiction).  
+Past performance does **not** guarantee future results.
+        """
+    )
+
+
 # =======================
 # Auth (Supabase)
 # =======================
