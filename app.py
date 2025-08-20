@@ -100,7 +100,7 @@ A bankroll management formula that adjusts bet size based on edge and probabilit
     )
 
 # --- Sidebar Feedback ---
-with st.sidebar.expander("💬 Feedback", expanded=False):
+with st.sidebar.expander("Feedback", expanded=False):
     feedback_text = st.text_area("Share your thoughts, ideas, or issues:", key="feedback_input")
     if st.button("Submit Feedback", key="feedback_submit"):
         if feedback_text.strip():
