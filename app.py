@@ -100,14 +100,18 @@ A bankroll management formula that adjusts bet size based on edge and probabilit
     )
 
 # --- Sidebar Feedback ---
-with st.sidebar.expander("Feedback", expanded=False):
-    feedback_text = st.text_area("Share your thoughts, ideas, or issues:", key="feedback_input")
-    if st.button("Submit Feedback", key="feedback_submit"):
+with st.sidebar:
+    with st.form("feedback_form", clear_on_submit=True):
+        feedback_text = st.text_area("Share your thoughts, ideas, or issues:", key="feedback_input")
+        submitted = st.form_submit_button("Submit Feedback")
+
+    if submitted:
         if feedback_text.strip():
-            # Right now just show a success message
-            # Later you could send this to Supabase, Google Sheet, or email
+            # TODO: send to Supabase / email / etc.
             st.success("Thanks for your feedback!")
-            st.session_state.feedback_input = ""  # clears box
+            # No manual session_state clearing needed; the form clears the textarea.
+            # If you need a rerun (e.g., to refresh a list), call:
+            # st.rerun()
         else:
             st.warning("Please enter some feedback before submitting.")
 
