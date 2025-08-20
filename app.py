@@ -89,9 +89,8 @@ Past performance does **not** guarantee future results.
         """
     )
 
-
 # =======================
-# Auth (Supabase)
+# Auth (Supabase) — stable, single-submit forms
 # =======================
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
@@ -102,40 +101,103 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-if "sb_session" not in st.session_state:
+# ---- Session state priming ----
+st.session_state.setdefault("sb_session", None)
+st.session_state.setdefault("sb_access_token", None)
+st.session_state.setdefault("sb_refresh_token", None)
+
+def _store_session(sess):
+    """Persist session + tokens in session_state."""
+    st.session_state.sb_session = sess
+    try:
+        st.session_state.sb_access_token = getattr(sess, "access_token", None) or sess.get("access_token")
+        st.session_state.sb_refresh_token = getattr(sess, "refresh_token", None) or sess.get("refresh_token")
+    except Exception:
+        # sess may be an object with attributes (gotrue Session) or a dict depending on lib version
+        pass
+
+def _clear_session():
     st.session_state.sb_session = None
+    st.session_state.sb_access_token = None
+    st.session_state.sb_refresh_token = None
+
+def _maybe_refresh_session():
+    """
+    Best-effort: if we have tokens but sb_session is None (after a rerun), try to refresh.
+    This avoids the 'first click fails, second works' pattern caused by stale local state.
+    """
+    if st.session_state.sb_session is None and st.session_state.sb_refresh_token:
+        try:
+            res = supabase.auth.refresh_session()
+            if res and getattr(res, "session", None):
+                _store_session(res.session)
+        except Exception:
+            # If refresh fails, clear so user is prompted to log in cleanly
+            _clear_session()
+
+# Try refreshing on load if we previously had tokens
+_maybe_refresh_session()
 
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
 
-    # --- Sign in ---
+    # --- Sign in (form = single atomic submit) ---
     with tabs[0]:
-        email = st.text_input("Email", key="signin_email")
-        password = st.text_input("Password", type="password", key="signin_pw")
-        if st.button("Sign in", key="btn_signin"):
+        with st.form("signin_form", clear_on_submit=False):
+            email = st.text_input("Email", key="signin_email")
+            password = st.text_input("Password", type="password", key="signin_pw")
+            submit = st.form_submit_button("Sign in")
+        if submit:
             try:
+                # Clear any stale session to prevent token conflicts
+                try:
+                    supabase.auth.sign_out()
+                except Exception:
+                    pass
                 res = supabase.auth.sign_in_with_password(
-                    {"email": email.strip(), "password": password}
+                    {"email": (email or "").strip(), "password": password}
                 )
-                st.session_state.sb_session = res.session
-                st.experimental_rerun()
+                # Some drivers return .session, others dict-like
+                sess = getattr(res, "session", None) or getattr(res, "session", {}) or None
+                if not sess:
+                    # Occasionally a verified email flow or weird state returns no session on first pass
+                    # Try one immediate refresh attempt to stabilize
+                    try:
+                        res2 = supabase.auth.refresh_session()
+                        sess = getattr(res2, "session", None) or getattr(res2, "session", {}) or None
+                    except Exception:
+                        pass
+
+                if sess:
+                    _store_session(sess)
+                    st.success("Signed in.")
+                    st.experimental_rerun()
+                else:
+                    st.error("Sign-in succeeded but no session was returned. Please try again.")
             except Exception as e:
-                st.error("Sign-in failed. Check your email/password or verify your email.")
+                msg = str(e)
+                # Make common errors clearer
+                if "Invalid login credentials" in msg:
+                    st.error("Sign-in failed: invalid email or password.")
+                elif "Email not confirmed" in msg or "confirmed_at" in msg:
+                    st.error("Please verify your email address, then sign in.")
+                else:
+                    st.error(f"Sign-in failed: {msg or 'Unknown error.'}")
 
-    # --- Create account (with name) ---
+    # --- Create account (form) ---
     with tabs[1]:
-        full_name = st.text_input("Name", key="signup_name")
-        email2 = st.text_input("Email", key="signup_email")
-        pw2 = st.text_input("Password", type="password", key="signup_pw")
-
-        if st.button("Create account", key="btn_signup"):
+        with st.form("signup_form", clear_on_submit=False):
+            full_name = st.text_input("Name", key="signup_name")
+            email2 = st.text_input("Email", key="signup_email")
+            pw2 = st.text_input("Password", type="password", key="signup_pw")
+            submit2 = st.form_submit_button("Create account")
+        if submit2:
             if not full_name.strip():
                 st.warning("Please enter your full name.")
             elif not email2 or not pw2:
                 st.warning("Email and password are required.")
             else:
                 try:
-                    # Store name in user_metadata at signup
                     res = supabase.auth.sign_up(
                         {
                             "email": email2.strip(),
@@ -143,16 +205,18 @@ def auth_view():
                             "options": {"data": {"full_name": full_name.strip()}},
                         }
                     )
-                    # For email-confirmation flows, session will be None until the user clicks the link
+                    # For email-confirmation flows, session may be None until the user confirms
                     st.success("Account created. Check your email to verify, then sign in.")
                 except Exception as e:
-                    st.error("Sign-up failed. Try a different email or password.")
+                    st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
 
 def require_auth():
+    # If session dropped after a rerun, try to refresh once more before prompting UI
+    if st.session_state.sb_session is None:
+        _maybe_refresh_session()
     if st.session_state.sb_session is None:
         auth_view()
         st.stop()
-
 
 # =======================
 # NFL app config
