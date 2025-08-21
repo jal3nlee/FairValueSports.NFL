@@ -417,91 +417,74 @@ def best_prices(df_evt_books: pd.DataFrame):
 # =======================
 def run_app():
     if not API_KEY:
-        st.error("Missing ODDS_API_KEY environment variable."); st.stop()
+        st.error("Missing ODDS_API_KEY environment variable.")
+        st.stop()
 
     st.title("NFL Expected Value Model")
     region = "us"
 
-PACIFIC = ZoneInfo("America/Los_Angeles")
+    # --- helpers for short date captions (Pacific time) ---
+    PACIFIC = ZoneInfo("America/Los_Angeles")
 
-def _short_md(dt_utc):
-    """M/D in Pacific time, no leading zeros."""
-    local = dt_utc.astimezone(PACIFIC)
-    return f"{local.month}/{local.day}"
+    def _short_md(dt_utc):
+        """M/D in Pacific time, no leading zeros."""
+        local = dt_utc.astimezone(PACIFIC)
+        return f"{local.month}/{local.day}"
 
-def _short_day_md(dt_utc):
-    """Thu 8/21 in Pacific time."""
-    local = dt_utc.astimezone(PACIFIC)
-    return f"{local.strftime('%a')} {local.month}/{local.day}"
+    def _short_day_md(dt_utc):
+        """Thu 8/21 in Pacific time."""
+        local = dt_utc.astimezone(PACIFIC)
+        return f"{local.strftime('%a')} {local.month}/{local.day}"
 
-# Window dropdown
-now_utc = datetime.now(timezone.utc)
-current_week = infer_current_week_index(now_utc)
-window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
+    # --- Window dropdown ---
+    now_utc = datetime.now(timezone.utc)
+    current_week = infer_current_week_index(now_utc)
+    window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
 
-if window_choice == "Today":
-    window_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
-    sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
-    caption_label = f"Today ({_short_md(window_start)})"
-else:
-    week_index   = current_week
-    window_start, window_end = nfl_week_window_utc(week_index, now_utc)
-    sport_key    = sport_key_for_week(week_index)
-    # Show Thu..Tue window in short format (Pacific)
-    caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
+    if window_choice == "Today":
+        window_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
+        sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
+        caption_label = f"Today ({_short_md(window_start)})"
+    else:
+        week_index   = current_week
+        window_start, window_end = nfl_week_window_utc(week_index, now_utc)
+        sport_key    = sport_key_for_week(week_index)
+        # Thu..Tue window in short format
+        caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
-# --- Fetch odds & record pull time (Pacific) ---
-pulled_at = None
-params = {"apiKey": API_KEY, "regions": "us", "markets": "h2h", "oddsFormat": "american"}
-try:
-    pulled_at = datetime.now(PACIFIC)  # exact local stamp of this pull
-    events = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30).json()
-except Exception as e:
-    st.error(f"API error: {e}"); st.stop()
+    # --- Inputs ---
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        weekly_bankroll = st.number_input(
+            "Weekly Bankroll ($)",
+            min_value=0.0,
+            value=1000.0,
+            step=50.0,
+            help="Total budget for the week."
+        )
+    with c2:
+        kelly_factor = st.slider(
+            "Kelly Factor (0.0–1.0)",
+            min_value=0.0, max_value=1.0,
+            value=0.5, step=0.05,
+            help="Controls bet size. Lower = safer, higher = riskier."
+        )
+    with c3:
+        min_ev = st.number_input(
+            "Minimum EV% to display",
+            value=0.0, step=0.5,
+            help="Higher threshold = fewer, stronger plays."
+        )
 
-# ... your filtering/processing ...
-
-# When you display the header/table:
-st.subheader("Games & EV")
-st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at.strftime('%b %d, %Y %I:%M %p %Z')}")
-
-
-# --- Inputs ---
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    weekly_bankroll = st.number_input(
-        "Weekly Bankroll ($)",
-        min_value=0.0,
-        value=1000.0,
-        step=50.0,
-        help="Total budget for the week."
+    show_all = st.checkbox(
+        "Show all games (ignore EV% filter)",
+        value=False,
+        help="Tick to display every matchup regardless of EV%."
     )
-
-with c2:
-    kelly_factor = st.slider(
-        "Kelly Factor (0.0–1.0)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.5,
-        step=0.05,
-        help="Scales bet size relative to bankroll."
-    )
-
-with c3:
-    min_ev = st.number_input(
-        "Minimum EV% to display",
-        value=0.0,
-        step=0.5,
-        help="Filters out bets below this expected value."
-    )
-
-show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
 
     # --- Fetch odds (record exact pull time in Pacific) ---
-    pulled_at_local = datetime.now(ZoneInfo("America/Los_Angeles"))
-
+    pulled_at_local = datetime.now(PACIFIC)
     params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
     try:
         resp = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30)
@@ -515,7 +498,7 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
         st.warning("No events returned.")
         st.stop()
 
-    # Filter to chosen window
+    # Filter to chosen window (commence_time is UTC)
     events = [
         ev for ev in events
         if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end
@@ -524,7 +507,7 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
         st.info(f"No NFL games in the selected window ({caption_label}).")
         st.stop()
 
-    # Build -> devig -> best
+    # Build -> de-vig -> best
     df_books = build_market(events, selected_books=None)
     if df_books.empty:
         st.warning("No odds available in this window.")
@@ -534,7 +517,7 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
     bests = best_prices(df_books)
     merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
 
-    # Rows
+    # Rows for display
     rows = []
     for _, r in merged.iterrows():
         date_str = fmt_date_est_str(r.get("commence_time"))
@@ -608,3 +591,19 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
         f"<span style='color:{color}'>{util_pct:.1f}% of weekly bankroll</span>",
         unsafe_allow_html=True
     )
+
+# ===== Require login, then run app =====
+require_auth()
+
+with st.sidebar:
+    st.write("Logged in")
+    if st.button("Log out"):
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
+        st.session_state.sb_session = None
+        st.rerun()
+
+run_app()
+
