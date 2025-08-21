@@ -467,41 +467,38 @@ st.subheader("Games & EV")
 st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at.strftime('%b %d, %Y %I:%M %p %Z')}")
 
 
- # ✅ Inputs (now properly indented inside run_app)
-    c1, c2, c3 = st.columns(3)
+# --- Inputs ---
+c1, c2, c3 = st.columns(3)
 
-    with c1:
-        weekly_bankroll = st.number_input(
-            "Weekly Bankroll ($)",
-            min_value=0.0,
-            value=1000.0,
-            step=50.0,
-            help="Total budget for the week."
-        )
-
-    with c2:
-        kelly_factor = st.slider(
-            "Kelly Factor (0.0–1.0)",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.05,
-            help="Controls bet size."
-        )
-
-    with c3:
-        min_ev = st.number_input(
-            "Minimum EV% to display",
-            value=0.0,
-            step=0.5,
-            help="Filter out low-value bets."
-        )
-
-    show_all = st.checkbox(
-        "Show all games",
-        value=False,
-        help="Remove EV% filter."
+with c1:
+    weekly_bankroll = st.number_input(
+        "Weekly Bankroll ($)",
+        min_value=0.0,
+        value=1000.0,
+        step=50.0,
+        help="Total budget for the week."
     )
+
+with c2:
+    kelly_factor = st.slider(
+        "Kelly Factor (0.0–1.0)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,
+        step=0.05,
+        help="Scales bet size relative to bankroll."
+    )
+
+with c3:
+    min_ev = st.number_input(
+        "Minimum EV% to display",
+        value=0.0,
+        step=0.5,
+        help="Filters out bets below this expected value."
+    )
+
+show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
+
   
 
     # Fetch odds
