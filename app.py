@@ -422,23 +422,51 @@ def run_app():
     st.title("NFL Expected Value Model")
     region = "us"
 
-    # Window dropdown
-    now = datetime.now(timezone.utc)
-    current_week = infer_current_week_index(now)
-    window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
+   from zoneinfo import ZoneInfo
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
-    if window_choice == "Today":
-        window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
-        sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
-        caption_label = f"Today ({window_start.strftime('%Y-%m-%d')} UTC)"
-    else:
-        week_index   = current_week
-        window_start, window_end = nfl_week_window_utc(week_index, now)
-        sport_key    = sport_key_for_week(week_index)
-        caption_label = ("Week 0 (before Sep 4) — "
-                         f"{window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC") if week_index == 0 \
-                        else (f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
+def _short_md(dt_utc):
+    """M/D in Pacific time, no leading zeros."""
+    local = dt_utc.astimezone(PACIFIC)
+    return f"{local.month}/{local.day}"
+
+def _short_day_md(dt_utc):
+    """Thu 8/21 in Pacific time."""
+    local = dt_utc.astimezone(PACIFIC)
+    return f"{local.strftime('%a')} {local.month}/{local.day}"
+
+# Window dropdown
+now_utc = datetime.now(timezone.utc)
+current_week = infer_current_week_index(now_utc)
+window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
+
+if window_choice == "Today":
+    window_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
+    sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
+    caption_label = f"Today ({_short_md(window_start)})"
+else:
+    week_index   = current_week
+    window_start, window_end = nfl_week_window_utc(week_index, now_utc)
+    sport_key    = sport_key_for_week(week_index)
+    # Show Thu..Tue window in short format (Pacific)
+    caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
+
+# --- Fetch odds & record pull time (Pacific) ---
+pulled_at = None
+params = {"apiKey": API_KEY, "regions": "us", "markets": "h2h", "oddsFormat": "american"}
+try:
+    pulled_at = datetime.now(PACIFIC)  # exact local stamp of this pull
+    events = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30).json()
+except Exception as e:
+    st.error(f"API error: {e}"); st.stop()
+
+# ... your filtering/processing ...
+
+# When you display the header/table:
+st.subheader("Games & EV")
+st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at.strftime('%b %d, %Y %I:%M %p %Z')}")
+
 
  # ✅ Inputs (now properly indented inside run_app)
     c1, c2, c3 = st.columns(3)
