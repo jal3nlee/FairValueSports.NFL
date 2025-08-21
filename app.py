@@ -499,27 +499,36 @@ with c3:
 
 show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
 
-  
+    # --- Fetch odds (record exact pull time in Pacific) ---
+    pulled_at_local = datetime.now(ZoneInfo("America/Los_Angeles"))
 
-    # Fetch odds
     params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
     try:
-        events = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30).json()
+        resp = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30)
+        resp.raise_for_status()
+        events = resp.json()
     except Exception as e:
-        st.error(f"API error: {e}"); st.stop()
+        st.error(f"API error: {e}")
+        st.stop()
 
     if not isinstance(events, list) or not events:
-        st.warning("No events returned."); st.stop()
+        st.warning("No events returned.")
+        st.stop()
 
     # Filter to chosen window
-    events = [ev for ev in events if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end]
+    events = [
+        ev for ev in events
+        if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end
+    ]
     if not events:
-        st.info(f"No NFL games in the selected window ({caption_label})."); st.stop()
+        st.info(f"No NFL games in the selected window ({caption_label}).")
+        st.stop()
 
     # Build -> devig -> best
     df_books = build_market(events, selected_books=None)
     if df_books.empty:
-        st.warning("No odds available in this window."); st.stop()
+        st.warning("No odds available in this window.")
+        st.stop()
 
     cons = compute_consensus_fair_probs(df_books)
     bests = best_prices(df_books)
@@ -557,12 +566,14 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
 
     df = pd.DataFrame(rows)
     if df.empty:
-        st.info("No sides available."); st.stop()
+        st.info("No sides available.")
+        st.stop()
 
     if not show_all:
         df = df[df["EV%"] >= float(min_ev)].reset_index(drop=True)
         if df.empty:
-            st.info("No games meet the EV% filter for this window."); st.stop()
+            st.info("No games meet the EV% filter for this window.")
+            st.stop()
 
     df = df.sort_values(["EV%","Implied Probability"], ascending=[False, False]).reset_index(drop=True)
 
@@ -581,7 +592,9 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
     show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
 
     st.subheader("Games & EV")
-    st.caption(f"Window: {caption_label}")
+    st.caption(
+        f"Window: {caption_label}  |  Data pulled: {pulled_at_local.strftime('%b %d, %Y %I:%M %p %Z')}"
+    )
     st.dataframe(
         show[["Date","Game","Pick","Best Odds","Best Book","Implied Probability","EV%","Kelly %","Stake ($)"]],
         use_container_width=True, hide_index=True,
@@ -595,18 +608,3 @@ show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
         f"<span style='color:{color}'>{util_pct:.1f}% of weekly bankroll</span>",
         unsafe_allow_html=True
     )
-
-# ===== Require login, then run app =====
-require_auth()
-
-with st.sidebar:
-    st.write("Logged in")
-    if st.button("Log out"):
-        try:
-            supabase.auth.sign_out()
-        except:
-            pass
-        st.session_state.sb_session = None
-        st.experimental_rerun()
-
-run_app()
