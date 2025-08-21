@@ -92,7 +92,7 @@ with st.sidebar.expander("How to use", expanded=False):
 2. **Set inputs**:
    - **Weekly Bankroll ($)** — your total budget for the week.
    - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
-   - **Minimum EV%** — filter picks below this expected value.
+   - **Minimum EV%** — filter picks above this expected value.
 3. **Review the table**:
    - **Implied Probability** = de-vigged market consensus.
    - **EV%** = edge versus best available odds.
@@ -459,7 +459,7 @@ def run_app():
             max_value=1.0,
             value=0.5,
             step=0.05,
-            help="Controls bet size. Lower = safer, higher = riskier."
+            help="Controls bet size."
         )
 
     with c3:
@@ -467,7 +467,7 @@ def run_app():
             "Minimum EV% to display",
             value=0.0,
             step=0.5,
-            help="Higher threshold = fewer, stronger plays."
+            help="Filter out low-value bets."
         )
 
     show_all = st.checkbox(
