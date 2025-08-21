@@ -422,7 +422,6 @@ def run_app():
     st.title("NFL Expected Value Model")
     region = "us"
 
-   from zoneinfo import ZoneInfo
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
 def _short_md(dt_utc):
