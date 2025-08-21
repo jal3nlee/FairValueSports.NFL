@@ -440,43 +440,41 @@ def run_app():
                          f"{window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC") if week_index == 0 \
                         else (f"NFL Week {week_index} — {window_start.strftime('%Y-%m-%d')} → {window_end.strftime('%Y-%m-%d')} UTC")
 
-  # Inputs
-c1, c2, c3 = st.columns(3)
+ # ✅ Inputs (now properly indented inside run_app)
+    c1, c2, c3 = st.columns(3)
 
-with c1:
-    weekly_bankroll = st.number_input(
-        "Weekly Bankroll ($)",
-        min_value=0.0,
-        value=1000.0,
-        step=50.0,
-        help="Total budget for the week."
+    with c1:
+        weekly_bankroll = st.number_input(
+            "Weekly Bankroll ($)",
+            min_value=0.0,
+            value=1000.0,
+            step=50.0,
+            help="Total budget for the week."
+        )
+
+    with c2:
+        kelly_factor = st.slider(
+            "Kelly Factor (0.0–1.0)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.5,
+            step=0.05,
+            help="Controls bet size. Lower = safer, higher = riskier."
+        )
+
+    with c3:
+        min_ev = st.number_input(
+            "Minimum EV% to display",
+            value=0.0,
+            step=0.5,
+            help="Higher threshold = fewer, stronger plays."
+        )
+
+    show_all = st.checkbox(
+        "Show all games",
+        value=False,
+        help="Remove EV% filter."
     )
-
-with c2:
-    kelly_factor = st.slider(
-        "Kelly Factor (0.0–1.0)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.5,
-        step=0.05,
-        help="Controls bet size. Lower = safer, higher = riskier."
-    )
-
-with c3:
-    min_ev = st.number_input(
-        "Minimum EV% to display",
-        value=0.0,
-        step=0.5,
-        help="Higher threshold = fewer, stronger plays."
-    )
-
-show_all = st.checkbox(
-    "Show all games (ignore EV% filter)",
-    value=False,
-    help="Tick to display every matchup regardless of EV%."
-)
-
-show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
   
 
     # Fetch odds
