@@ -61,7 +61,7 @@ if FAVICON_PATH:
         favicon_img = None
 
 st.set_page_config(
-    page_title="Fair Value Sports",
+    page_title="Fair Value Betting",
     page_icon=(favicon_img if favicon_img else "🏈"),
     layout="wide",
 )
@@ -76,7 +76,7 @@ with st.sidebar:
     if LOGO_PATH:
         st.image(str(LOGO_PATH), width=SIDEBAR_W)
     else:
-        st.write("Fair Value Sports")
+        st.write("Fair Value Betting")
 # ===== END BRANDING =====
 
 # Make sure the sidebar opens by default (optional)
