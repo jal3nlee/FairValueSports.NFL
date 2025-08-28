@@ -27,9 +27,7 @@ if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_
     )
 
 # ===== BRANDING (clean, no debug) =====
-from pathlib import Path
 from PIL import Image
-import streamlit as st
 
 ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
@@ -64,6 +62,7 @@ st.set_page_config(
     page_title="Fair Value Betting",
     page_icon=(favicon_img if favicon_img else "🏈"),
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 HEADER_W = 560
@@ -78,9 +77,6 @@ with st.sidebar:
     else:
         st.write("Fair Value Betting")
 # ===== END BRANDING =====
-
-# Make sure the sidebar opens by default (optional)
-st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 
 # --- Sidebar ---
 st.sidebar.divider()
@@ -155,7 +151,6 @@ with st.sidebar.expander("Feedback", expanded=False):
                 except Exception as e:
                     st.error(f"Error saving feedback: {e}")
 
-
 with st.sidebar.expander("Disclaimer", expanded=False):
     st.markdown(
         """
@@ -176,6 +171,7 @@ def _store_session(sess):
         st.session_state.sb_access_token = getattr(sess, "access_token", None) or sess.get("access_token")
         st.session_state.sb_refresh_token = getattr(sess, "refresh_token", None) or sess.get("refresh_token")
     except Exception:
+        # sess may be an object with attributes (gotrue Session) or a dict depending on lib version
         pass
 
 def _clear_session():
@@ -184,13 +180,17 @@ def _clear_session():
     st.session_state.sb_refresh_token = None
 
 def _maybe_refresh_session():
-    """Best-effort: refresh once if we have tokens but sb_session is None."""
+    """
+    Best-effort: if we have tokens but sb_session is None (after a rerun), try to refresh.
+    This avoids the 'first click fails, second works' pattern caused by stale local state.
+    """
     if st.session_state.sb_session is None and st.session_state.sb_refresh_token:
         try:
             res = supabase.auth.refresh_session()
             if res and getattr(res, "session", None):
                 _store_session(res.session)
         except Exception:
+            # If refresh fails, clear so user is prompted to log in cleanly
             _clear_session()
 
 # Try refreshing on load if we previously had tokens
@@ -199,7 +199,7 @@ _maybe_refresh_session()
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
 
-    # --- Sign in ---
+    # --- Sign in (form = single atomic submit) ---
     with tabs[0]:
         with st.form("signin_form", clear_on_submit=False):
             email = st.text_input("Email", key="signin_email")
@@ -207,6 +207,7 @@ def auth_view():
             submit = st.form_submit_button("Sign in")
         if submit:
             try:
+                # Clear any stale session to prevent token conflicts
                 try:
                     supabase.auth.sign_out()
                 except Exception:
@@ -214,8 +215,11 @@ def auth_view():
                 res = supabase.auth.sign_in_with_password(
                     {"email": (email or "").strip(), "password": password}
                 )
+                # Some drivers return .session, others dict-like
                 sess = getattr(res, "session", None) or getattr(res, "session", {}) or None
                 if not sess:
+                    # Occasionally a verified email flow or weird state returns no session on first pass
+                    # Try one immediate refresh attempt to stabilize
                     try:
                         res2 = supabase.auth.refresh_session()
                         sess = getattr(res2, "session", None) or getattr(res2, "session", {}) or None
@@ -230,6 +234,7 @@ def auth_view():
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
             except Exception as e:
                 msg = str(e)
+                # Make common errors clearer
                 if "Invalid login credentials" in msg:
                     st.error("Sign-in failed: invalid email or password.")
                 elif "Email not confirmed" in msg or "confirmed_at" in msg:
@@ -237,7 +242,7 @@ def auth_view():
                 else:
                     st.error(f"Sign-in failed: {msg or 'Unknown error.'}")
 
-    # --- Create account ---
+    # --- Create account (form) ---
     with tabs[1]:
         with st.form("signup_form", clear_on_submit=False):
             full_name = st.text_input("Name", key="signup_name")
@@ -251,18 +256,20 @@ def auth_view():
                 st.warning("Email and password are required.")
             else:
                 try:
-                    supabase.auth.sign_up(
+                    res = supabase.auth.sign_up(
                         {
                             "email": email2.strip(),
                             "password": pw2,
                             "options": {"data": {"full_name": full_name.strip()}},
                         }
                     )
+                    # For email-confirmation flows, session may be None until the user confirms
                     st.success("Account created. Check your email to verify, then sign in.")
                 except Exception as e:
                     st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
 
 def require_auth():
+    # If session dropped after a rerun, try to refresh once more before prompting UI
     if st.session_state.sb_session is None:
         _maybe_refresh_session()
     if st.session_state.sb_session is None:
@@ -278,10 +285,8 @@ EASTERN = ZoneInfo("America/New_York")
 
 # ---------- helpers ----------
 def american_to_implied_prob(odds):
-    try:
-        o = int(odds)
-    except Exception:
-        return None
+    try: o = int(odds)
+    except Exception: return None
     return 100/(o+100) if o > 0 else (-o)/(-o+100)
 
 def american_to_decimal(odds):
@@ -296,46 +301,34 @@ def kelly_fraction(true_prob: float, american_odds: int) -> float:
     d = american_to_decimal(american_odds)
     b = d - 1.0
     p = float(true_prob); q = 1.0 - p
-    if b <= 0:
-        return 0.0
+    if b <= 0: return 0.0
     return max(0.0, (b*p - q) / b)
 
 def devig_two_way(p_home: float, p_away: float):
     a = (p_home or 0.0); b = (p_away or 0.0); s = a + b
-    if s <= 0:
-        return None, None
+    if s <= 0: return None, None
     return a/s, b/s
 
 def parse_iso_dt_utc(iso_s: str):
-    try:
-        return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
-    except Exception:
-        return None
+    try: return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
+    except Exception: return None
 
 def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
     dt = parse_iso_dt_utc(iso_s)
-    if not dt:
-        return None
+    if not dt: return None
     et = dt.astimezone(EASTERN)
     if snap_odd_minutes:
-        if et.minute == 1:
-            et = et - timedelta(minutes=1)
-        elif et.minute == 59:
-            et = et + timedelta(minutes=1)
+        if et.minute == 1:  et = et - timedelta(minutes=1)
+        elif et.minute == 59: et = et + timedelta(minutes=1)
     dow = et.strftime("%a")
     md  = f"{et.month}/{et.day}"
     tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
-# ---- NFL week helpers (season-aware, ET-anchored) ----
-def nfl_season_year(now_utc: datetime) -> int:
-    """NFL season year: Sep–Dec = this year; Jan–Aug = prior year (anchored to ET)."""
-    local = now_utc.astimezone(EASTERN)
-    return local.year if local.month >= 9 else local.year - 1
-
-def thursday_after_labor_day_utc(season_year: int) -> datetime:
-    """Compute the Thursday after Labor Day at 00:00 ET, then convert to UTC."""
-    d = datetime(season_year, 9, 1, tzinfo=EASTERN)
+# ---- NFL week helpers (ET-anchored, current-year opener) ----
+def thursday_after_labor_day_utc(year: int) -> datetime:
+    """Thursday after Labor Day at 00:00 ET, converted to UTC."""
+    d = datetime(year, 9, 1, tzinfo=EASTERN)
     # first Monday in September = Labor Day
     while d.weekday() != 0:  # 0 = Monday
         d += timedelta(days=1)
@@ -344,10 +337,11 @@ def thursday_after_labor_day_utc(season_year: int) -> datetime:
 
 def nfl_week_window_utc(week_index: int, now_utc: datetime):
     """Thu 00:00 ET → Tue 23:59:59 ET window, returned in UTC."""
-    season = nfl_season_year(now_utc)
-    wk1 = thursday_after_labor_day_utc(season)
+    # Always anchor to the current calendar year's opener
+    yr = now_utc.astimezone(EASTERN).year
+    wk1 = thursday_after_labor_day_utc(yr)
     if week_index == 0:
-        start = datetime(season, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(yr, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end   = wk1 - timedelta(seconds=1)
         return start, end
     start = wk1 + timedelta(days=7 * (week_index - 1))
@@ -355,21 +349,23 @@ def nfl_week_window_utc(week_index: int, now_utc: datetime):
     return start, end
 
 def infer_current_week_index(now_utc: datetime) -> int:
-    """Return 0 before Week 1; otherwise clamp to regular-season weeks (1..18)."""
-    season = nfl_season_year(now_utc)
-    wk1 = thursday_after_labor_day_utc(season)
+    """
+    Return 0 before Week 1 (preseason);
+    otherwise clamp to regular-season weeks (1..18) for labeling.
+    """
+    yr = now_utc.astimezone(EASTERN).year
+    wk1 = thursday_after_labor_day_utc(yr)
     if now_utc < wk1:
         return 0
     weeks = (now_utc - wk1).days // 7 + 1
-    return max(1, min(18, weeks))  # clamp to 18 regular-season weeks
+    return max(1, min(18, weeks))
 
 def sport_key_for_week(week_index: int) -> str:
     return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
 
 def pretty_book_title(bm: dict) -> str:
     title = bm.get("title")
-    if title:
-        return title
+    if title: return title
     key = (bm.get("key") or "").replace("_", " ").title()
     return key or "Sportsbook"
 
@@ -379,16 +375,14 @@ def build_market(events, selected_books=None):
         home, away = ev.get("home_team"), ev.get("away_team")
         eid, t0 = ev.get("id"), ev.get("commence_time")
         for bm in ev.get("bookmakers", []):
-            if selected_books and bm.get("key") not in selected_books:
-                continue
+            if selected_books and bm.get("key") not in selected_books: continue
             price_home, price_away = None, None
             for mk in bm.get("markets", []):
                 if mk.get("key") == "h2h":
                     side_map = {o.get("name",""): o.get("price") for o in mk.get("outcomes", [])}
                     price_home = side_map.get(home); price_away = side_map.get(away)
                     break
-            if price_home is None and price_away is None:
-                continue
+            if price_home is None and price_away is None: continue
             rows.append({
                 "event_id": eid, "home_team": home, "away_team": away,
                 "book": pretty_book_title(bm),
@@ -398,8 +392,7 @@ def build_market(events, selected_books=None):
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 def compute_consensus_fair_probs(df_evt_books: pd.DataFrame):
-    if df_evt_books.empty:
-        return pd.DataFrame()
+    if df_evt_books.empty: return pd.DataFrame()
     tmp = df_evt_books.copy()
     tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
     tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
@@ -453,14 +446,19 @@ def run_app():
         local = dt_utc.astimezone(PACIFIC)
         return f"{local.strftime('%a')} {local.month}/{local.day}"
 
+    # Window: Next 7 Days (today 00:00 PT → next Thursday 23:59:59 PT)
     def window_next_7_days(now_utc, tz=PACIFIC):
         """
-        Start = today 00:00 local; End = +7 days 23:59:59 local.
-        Label remains 'Next 7 Days'.
+        Start = today 00:00 local; End = next Thursday 23:59:59 local.
+        If today is Thu, "next Thursday" is one week out.
         """
         local = now_utc.astimezone(tz)
         start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_local = (start_local + timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=0)
+        # next Thursday relative to today's midnight
+        days_to_next_thu = (3 - start_local.weekday()) % 7  # Thu=3
+        if days_to_next_thu == 0:
+            days_to_next_thu = 7
+        end_local = start_local + timedelta(days=days_to_next_thu, hours=23, minutes=59, seconds=59)
         return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
     # --- Window dropdown ---
