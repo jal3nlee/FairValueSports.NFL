@@ -410,7 +410,7 @@ def run_app():
         local = dt_utc.astimezone(PACIFIC)
         return f"{local.strftime('%a')} {local.month}/{local.day}"
 
-    # NEW: "Next 7 Days" that actually shows today + next 8 days (so next Thursday is always included)
+    # "Next 7 Days" that actually shows today + next 8 days (so next Thursday is always included)
     def window_next_7_days(now_utc, tz=PACIFIC):
         """
         Start = today 00:00 local
@@ -427,7 +427,13 @@ def run_app():
     week_label = "NFL Preseason" if current_week == 0 else f"NFL Week {current_week}"
 
     window_options = ["Today", week_label, "Next 7 Days"]
-    window_choice = st.selectbox("Window", window_options, index=1, key="window_choice")
+    window_choice = st.selectbox(
+        "Window",
+        window_options,
+        index=1,
+        key="window_choice",
+        help="Choose a time window. “Next 7 Days” shows games from today’s local midnight through the end of the 8th day (PT)."
+    )
 
     # Determine time window + sport key(s)
     if window_choice == "Today":
@@ -455,13 +461,29 @@ def run_app():
     # --- Inputs ---
     c1, c2, c3 = st.columns(3)
     with c1:
-        weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
+        weekly_bankroll = st.number_input(
+            "Weekly Bankroll ($)",
+            min_value=0.0, value=1000.0, step=50.0,
+            help="Total budget for this week."
+        )
     with c2:
-        kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+        kelly_factor = st.slider(
+            "Kelly Factor (0.0–1.0)",
+            min_value=0.0, max_value=1.0, value=0.5, step=0.05,
+            help="Controls bet size. Lower = safer; higher = riskier."
+        )
     with c3:
-        min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5)
+        min_ev = st.number_input(
+            "Minimum EV% to display",
+            value=0.0, step=0.5,
+            help="Filter out plays below this expected value."
+        )
 
-    show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
+    show_all = st.checkbox(
+        "Show all games (ignore EV% filter)",
+        value=False,
+        help="Display every matchup regardless of EV%."
+    )
 
     # --- Fetch odds (record exact pull time in Pacific) ---
     pulled_at_local = datetime.now(PACIFIC)
