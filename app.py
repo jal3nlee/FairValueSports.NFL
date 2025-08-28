@@ -432,7 +432,7 @@ def run_app():
         window_options,
         index=1,
         key="window_choice",
-        help="Choose a time window. “Next 7 Days” shows games from today’s local midnight through the end of the 8th day (PT)."
+        help="Choose a time window. “Next 7 Days” shows games from today through the next full week."
     )
 
     # Determine time window + sport key(s)
