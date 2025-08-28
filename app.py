@@ -88,7 +88,7 @@ st.sidebar.divider()
 with st.sidebar.expander("How to use", expanded=False):
     st.markdown(
         """
-1. **Pick a Window**: choose **Today** or **NFL Week X** from the dropdown.
+1. **Pick a Window**: choose **Today**, **NFL Week X**, or **Through Next Thursday** from the dropdown.
 2. **Set inputs**:
    - **Weekly Bankroll ($)** — your total budget for the week.
    - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
@@ -330,25 +330,40 @@ def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
     tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
-# ---- Hard-coded NFL weeks (Week 1 = Sep 4 00:00 UTC; Week 0 = before that) ----
-def nfl_week1_kickoff_thursday_utc(year: int) -> datetime:
-    return datetime(year, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+# ---- NFL week helpers (season-aware, ET-anchored) ----
+def nfl_season_year(now_utc: datetime) -> int:
+    """NFL season year: Sep–Dec = this year; Jan–Aug = prior year (anchored to ET)."""
+    local = now_utc.astimezone(EASTERN)
+    return local.year if local.month >= 9 else local.year - 1
+
+def thursday_after_labor_day_utc(season_year: int) -> datetime:
+    """Compute the Thursday after Labor Day at 00:00 ET, then convert to UTC."""
+    d = datetime(season_year, 9, 1, tzinfo=EASTERN)
+    # first Monday in September = Labor Day
+    while d.weekday() != 0:  # 0 = Monday
+        d += timedelta(days=1)
+    opener_et_midnight = (d + timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return opener_et_midnight.astimezone(timezone.utc)
 
 def nfl_week_window_utc(week_index: int, now_utc: datetime):
-    wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
+    """Thu 00:00 ET → Tue 23:59:59 ET window, returned in UTC."""
+    season = nfl_season_year(now_utc)
+    wk1 = thursday_after_labor_day_utc(season)
     if week_index == 0:
-        start = datetime(now_utc.year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        start = datetime(season, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end   = wk1 - timedelta(seconds=1)
         return start, end
-    start = wk1 + timedelta(days=7*(week_index-1))
+    start = wk1 + timedelta(days=7 * (week_index - 1))
     end   = start + timedelta(days=5, hours=23, minutes=59, seconds=59)
     return start, end
 
 def infer_current_week_index(now_utc: datetime) -> int:
-    wk1 = nfl_week1_kickoff_thursday_utc(now_utc.year)
-    if now_utc < wk1: return 0
+    season = nfl_season_year(now_utc)
+    wk1 = thursday_after_labor_day_utc(season)
+    if now_utc < wk1:
+        return 0
     weeks = (now_utc - wk1).days // 7 + 1
-    return max(1, min(19, weeks))
+    return max(1, min(22, weeks))  # allow through playoffs
 
 def sport_key_for_week(week_index: int) -> str:
     return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
@@ -436,21 +451,48 @@ def run_app():
         local = dt_utc.astimezone(PACIFIC)
         return f"{local.strftime('%a')} {local.month}/{local.day}"
 
+    def window_through_next_thursday(now_utc, tz=PACIFIC):
+        """
+        Start = today 00:00 local; End = next Thursday 23:59:59 local.
+        If today is Thu, "next Thursday" is one week out.
+        """
+        local = now_utc.astimezone(tz)
+        start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        days_ahead = (3 - start_local.weekday()) % 7  # Thu = 3
+        if days_ahead == 0:
+            days_ahead = 7
+        end_local = start_local + timedelta(days=days_ahead, hours=23, minutes=59, seconds=59)
+        return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
     # --- Window dropdown ---
     now_utc = datetime.now(timezone.utc)
     current_week = infer_current_week_index(now_utc)
-    window_choice = st.selectbox("Window", ["Today", f"Week {current_week}"], index=1)
+    week_label = "NFL Preseason" if current_week == 0 else f"NFL Week {current_week}"
 
+    window_options = ["Today", week_label, "Through Next Thursday"]
+    window_choice = st.selectbox("Window", window_options, index=1, key="window_choice")
+
+    # Determine time window + sport key(s)
     if window_choice == "Today":
-        window_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        window_end   = window_start + timedelta(hours=23, minutes=59, seconds=59)
-        sport_key    = sport_key_for_week(0 if current_week == 0 else current_week)
+        now_local = datetime.now(PACIFIC)
+        window_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+        window_end   = (window_start + timedelta(days=1)) - timedelta(seconds=1)
+        sport_keys   = {sport_key_for_week(current_week)}
         caption_label = f"Today ({_short_md(window_start)})"
-    else:
+
+    elif window_choice == week_label:
         week_index   = current_week
         window_start, window_end = nfl_week_window_utc(week_index, now_utc)
-        sport_key    = sport_key_for_week(week_index)
-        # Thu..Tue window in short format
+        sport_keys   = {sport_key_for_week(week_index)}
+        caption_label = f"{week_label} — {_short_day_md(window_start)} – {_short_day_md(window_end)}"
+
+    else:  # "Through Next Thursday"
+        window_start, window_end = window_through_next_thursday(now_utc, tz=PACIFIC)
+        # Cover potential preseason→regular transition by fetching both ends' keys
+        sport_keys = {
+            sport_key_for_week(infer_current_week_index(window_start)),
+            sport_key_for_week(infer_current_week_index(window_end)),
+        }
         caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
     # --- Inputs ---
@@ -486,10 +528,15 @@ def run_app():
     # --- Fetch odds (record exact pull time in Pacific) ---
     pulled_at_local = datetime.now(PACIFIC)
     params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
+
+    events = []
     try:
-        resp = requests.get(f"{API_BASE}/sports/{sport_key}/odds", params=params, timeout=30)
-        resp.raise_for_status()
-        events = resp.json()
+        for key in sorted(sport_keys):
+            resp = requests.get(f"{API_BASE}/sports/{key}/odds", params=params, timeout=30)
+            resp.raise_for_status()
+            payload = resp.json()
+            if isinstance(payload, list):
+                events.extend(payload)
     except Exception as e:
         st.error(f"API error: {e}")
         st.stop()
@@ -606,4 +653,3 @@ with st.sidebar:
         st.rerun()
 
 run_app()
-
