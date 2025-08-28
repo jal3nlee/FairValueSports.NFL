@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
+from PIL import Image
 
 # =======================
 # Auth (Supabase) — stable, single-submit forms
@@ -27,8 +28,6 @@ if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_
     )
 
 # ===== BRANDING (clean, no debug) =====
-from PIL import Image
-
 ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
 
@@ -92,29 +91,18 @@ with st.sidebar.expander("How to use", expanded=False):
 3. **Review the table**:
    - **Implied Probability** = de-vigged market consensus.
    - **EV%** = edge versus best available odds.
-   - **Stake ($)** = how much you should bet based on Kelly Factor and Weekly Bankroll inputs.
+   - **Stake ($)** = recommended bet size based on Kelly & bankroll.
         """
     )
 
-# --- Sidebar Glossary ---
 with st.sidebar.expander("Glossary", expanded=False):
     st.markdown(
         """
-**EV% (Expected Value %)**  
-Represents the percentage edge you have over the market.  
-- Betting only positive EV% plays with a Kelly factor is mathematically profitable long-term, **BUT** only if the model’s probabilities are accurate and you can withstand short-term variance. 
-- Conservative bettors typically only take bets with +2–3% EV or higher.
-- Aggressive bettors may take bets with +0.5–1% EV or higher.
-
-**Kelly Factor**  
-A bankroll management formula that adjusts bet size based on edge and probability.  
-- **1.0** = full Kelly (aggressive, max growth but higher risk)  
-- **0.5** = half Kelly (more conservative)  
-- Lower values scale down risk even further.  
+**EV% (Expected Value %)** — Long-run edge if probabilities are accurate.  
+**Kelly Factor** — Scales bet size to edge; 1.0 = full Kelly, 0.5 = half Kelly.
         """
     )
 
-# --- Sidebar Feedback (requires login) ---
 with st.sidebar.expander("Feedback", expanded=False):
     user = None
     try:
@@ -128,9 +116,7 @@ with st.sidebar.expander("Feedback", expanded=False):
         with st.form("feedback_form", clear_on_submit=True):
             full_name = (user.user_metadata or {}).get("full_name") or (user.user_metadata or {}).get("name") or ""
             email_addr = getattr(user, "email", "") or (user.user_metadata or {}).get("email", "")
-
             st.markdown(f"**Submitting as:** {full_name or 'Unknown'}  \n**Email:** {email_addr or 'Unknown'}")
-
             feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
             submitted = st.form_submit_button("Submit Feedback")
 
@@ -154,8 +140,7 @@ with st.sidebar.expander("Feedback", expanded=False):
 with st.sidebar.expander("Disclaimer", expanded=False):
     st.markdown(
         """
-**Fair Value Sports** is for **education and entertainment** only.  
-Not to be used as financial or betting advice.
+**Fair Value Sports** is for **education and entertainment** only — not financial or betting advice.
         """
     )
 
@@ -165,13 +150,11 @@ st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
 
 def _store_session(sess):
-    """Persist session + tokens in session_state."""
     st.session_state.sb_session = sess
     try:
         st.session_state.sb_access_token = getattr(sess, "access_token", None) or sess.get("access_token")
         st.session_state.sb_refresh_token = getattr(sess, "refresh_token", None) or sess.get("refresh_token")
     except Exception:
-        # sess may be an object with attributes (gotrue Session) or a dict depending on lib version
         pass
 
 def _clear_session():
@@ -180,26 +163,18 @@ def _clear_session():
     st.session_state.sb_refresh_token = None
 
 def _maybe_refresh_session():
-    """
-    Best-effort: if we have tokens but sb_session is None (after a rerun), try to refresh.
-    This avoids the 'first click fails, second works' pattern caused by stale local state.
-    """
     if st.session_state.sb_session is None and st.session_state.sb_refresh_token:
         try:
             res = supabase.auth.refresh_session()
             if res and getattr(res, "session", None):
                 _store_session(res.session)
         except Exception:
-            # If refresh fails, clear so user is prompted to log in cleanly
             _clear_session()
 
-# Try refreshing on load if we previously had tokens
 _maybe_refresh_session()
 
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
-
-    # --- Sign in (form = single atomic submit) ---
     with tabs[0]:
         with st.form("signin_form", clear_on_submit=False):
             email = st.text_input("Email", key="signin_email")
@@ -207,25 +182,18 @@ def auth_view():
             submit = st.form_submit_button("Sign in")
         if submit:
             try:
-                # Clear any stale session to prevent token conflicts
                 try:
                     supabase.auth.sign_out()
                 except Exception:
                     pass
-                res = supabase.auth.sign_in_with_password(
-                    {"email": (email or "").strip(), "password": password}
-                )
-                # Some drivers return .session, others dict-like
+                res = supabase.auth.sign_in_with_password({"email": (email or "").strip(), "password": password})
                 sess = getattr(res, "session", None) or getattr(res, "session", {}) or None
                 if not sess:
-                    # Occasionally a verified email flow or weird state returns no session on first pass
-                    # Try one immediate refresh attempt to stabilize
                     try:
                         res2 = supabase.auth.refresh_session()
                         sess = getattr(res2, "session", None) or getattr(res2, "session", {}) or None
                     except Exception:
                         pass
-
                 if sess:
                     _store_session(sess)
                     st.success("Signed in.")
@@ -234,15 +202,12 @@ def auth_view():
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
             except Exception as e:
                 msg = str(e)
-                # Make common errors clearer
                 if "Invalid login credentials" in msg:
                     st.error("Sign-in failed: invalid email or password.")
                 elif "Email not confirmed" in msg or "confirmed_at" in msg:
                     st.error("Please verify your email address, then sign in.")
                 else:
                     st.error(f"Sign-in failed: {msg or 'Unknown error.'}")
-
-    # --- Create account (form) ---
     with tabs[1]:
         with st.form("signup_form", clear_on_submit=False):
             full_name = st.text_input("Name", key="signup_name")
@@ -256,20 +221,14 @@ def auth_view():
                 st.warning("Email and password are required.")
             else:
                 try:
-                    res = supabase.auth.sign_up(
-                        {
-                            "email": email2.strip(),
-                            "password": pw2,
-                            "options": {"data": {"full_name": full_name.strip()}},
-                        }
+                    supabase.auth.sign_up(
+                        {"email": email2.strip(), "password": pw2, "options": {"data": {"full_name": full_name.strip()}}}
                     )
-                    # For email-confirmation flows, session may be None until the user confirms
                     st.success("Account created. Check your email to verify, then sign in.")
                 except Exception as e:
                     st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
 
 def require_auth():
-    # If session dropped after a rerun, try to refresh once more before prompting UI
     if st.session_state.sb_session is None:
         _maybe_refresh_session()
     if st.session_state.sb_session is None:
@@ -285,8 +244,10 @@ EASTERN = ZoneInfo("America/New_York")
 
 # ---------- helpers ----------
 def american_to_implied_prob(odds):
-    try: o = int(odds)
-    except Exception: return None
+    try:
+        o = int(odds)
+    except Exception:
+        return None
     return 100/(o+100) if o > 0 else (-o)/(-o+100)
 
 def american_to_decimal(odds):
@@ -301,35 +262,41 @@ def kelly_fraction(true_prob: float, american_odds: int) -> float:
     d = american_to_decimal(american_odds)
     b = d - 1.0
     p = float(true_prob); q = 1.0 - p
-    if b <= 0: return 0.0
+    if b <= 0:
+        return 0.0
     return max(0.0, (b*p - q) / b)
 
 def devig_two_way(p_home: float, p_away: float):
     a = (p_home or 0.0); b = (p_away or 0.0); s = a + b
-    if s <= 0: return None, None
+    if s <= 0:
+        return None, None
     return a/s, b/s
 
 def parse_iso_dt_utc(iso_s: str):
-    try: return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
-    except Exception: return None
+    try:
+        return datetime.fromisoformat(iso_s.replace("Z","+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
 
 def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
     dt = parse_iso_dt_utc(iso_s)
-    if not dt: return None
+    if not dt:
+        return None
     et = dt.astimezone(EASTERN)
     if snap_odd_minutes:
-        if et.minute == 1:  et = et - timedelta(minutes=1)
-        elif et.minute == 59: et = et + timedelta(minutes=1)
+        if et.minute == 1:
+            et = et - timedelta(minutes=1)
+        elif et.minute == 59:
+            et = et + timedelta(minutes=1)
     dow = et.strftime("%a")
     md  = f"{et.month}/{et.day}"
     tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
-# ---- NFL week helpers (ET-anchored, current-year opener) ----
+# ---- NFL week helpers (ET-anchored, current-year opener; Week 0 until opener) ----
 def thursday_after_labor_day_utc(year: int) -> datetime:
     """Thursday after Labor Day at 00:00 ET, converted to UTC."""
     d = datetime(year, 9, 1, tzinfo=EASTERN)
-    # first Monday in September = Labor Day
     while d.weekday() != 0:  # 0 = Monday
         d += timedelta(days=1)
     opener_et_midnight = (d + timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -337,7 +304,6 @@ def thursday_after_labor_day_utc(year: int) -> datetime:
 
 def nfl_week_window_utc(week_index: int, now_utc: datetime):
     """Thu 00:00 ET → Tue 23:59:59 ET window, returned in UTC."""
-    # Always anchor to the current calendar year's opener
     yr = now_utc.astimezone(EASTERN).year
     wk1 = thursday_after_labor_day_utc(yr)
     if week_index == 0:
@@ -349,10 +315,7 @@ def nfl_week_window_utc(week_index: int, now_utc: datetime):
     return start, end
 
 def infer_current_week_index(now_utc: datetime) -> int:
-    """
-    Return 0 before Week 1 (preseason);
-    otherwise clamp to regular-season weeks (1..18) for labeling.
-    """
+    """Return 0 before Week 1; otherwise clamp to 1..18 (regular season)."""
     yr = now_utc.astimezone(EASTERN).year
     wk1 = thursday_after_labor_day_utc(yr)
     if now_utc < wk1:
@@ -365,7 +328,8 @@ def sport_key_for_week(week_index: int) -> str:
 
 def pretty_book_title(bm: dict) -> str:
     title = bm.get("title")
-    if title: return title
+    if title:
+        return title
     key = (bm.get("key") or "").replace("_", " ").title()
     return key or "Sportsbook"
 
@@ -375,14 +339,16 @@ def build_market(events, selected_books=None):
         home, away = ev.get("home_team"), ev.get("away_team")
         eid, t0 = ev.get("id"), ev.get("commence_time")
         for bm in ev.get("bookmakers", []):
-            if selected_books and bm.get("key") not in selected_books: continue
+            if selected_books and bm.get("key") not in selected_books:
+                continue
             price_home, price_away = None, None
             for mk in bm.get("markets", []):
                 if mk.get("key") == "h2h":
                     side_map = {o.get("name",""): o.get("price") for o in mk.get("outcomes", [])}
                     price_home = side_map.get(home); price_away = side_map.get(away)
                     break
-            if price_home is None and price_away is None: continue
+            if price_home is None and price_away is None:
+                continue
             rows.append({
                 "event_id": eid, "home_team": home, "away_team": away,
                 "book": pretty_book_title(bm),
@@ -392,7 +358,8 @@ def build_market(events, selected_books=None):
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 def compute_consensus_fair_probs(df_evt_books: pd.DataFrame):
-    if df_evt_books.empty: return pd.DataFrame()
+    if df_evt_books.empty:
+        return pd.DataFrame()
     tmp = df_evt_books.copy()
     tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
     tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
@@ -433,32 +400,25 @@ def run_app():
     st.title("NFL Expected Value Model")
     region = "us"
 
-    # --- helpers for short date captions (Pacific time) ---
     PACIFIC = ZoneInfo("America/Los_Angeles")
 
     def _short_md(dt_utc):
-        """M/D in Pacific time, no leading zeros."""
         local = dt_utc.astimezone(PACIFIC)
         return f"{local.month}/{local.day}"
 
     def _short_day_md(dt_utc):
-        """Thu 8/21 in Pacific time."""
         local = dt_utc.astimezone(PACIFIC)
         return f"{local.strftime('%a')} {local.month}/{local.day}"
 
-    # Window: Next 7 Days (today 00:00 PT → next Thursday 23:59:59 PT)
+    # NEW: "Next 7 Days" that actually shows today + next 8 days (so next Thursday is always included)
     def window_next_7_days(now_utc, tz=PACIFIC):
         """
-        Start = today 00:00 local; End = next Thursday 23:59:59 local.
-        If today is Thu, "next Thursday" is one week out.
+        Start = today 00:00 local
+        End   = 8 days later, 23:59:59 local  (inclusive)
         """
         local = now_utc.astimezone(tz)
         start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
-        # next Thursday relative to today's midnight
-        days_to_next_thu = (3 - start_local.weekday()) % 7  # Thu=3
-        if days_to_next_thu == 0:
-            days_to_next_thu = 7
-        end_local = start_local + timedelta(days=days_to_next_thu, hours=23, minutes=59, seconds=59)
+        end_local = (start_local + timedelta(days=8)).replace(hour=23, minute=59, second=59, microsecond=0)
         return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
     # --- Window dropdown ---
@@ -479,14 +439,14 @@ def run_app():
 
     elif window_choice == "Next 7 Days":
         window_start, window_end = window_next_7_days(now_utc, tz=PACIFIC)
-        # Cover potential preseason→regular transition by fetching both ends' keys
+        # Union of sport keys at edges to cover preseason ↔ regular
         sport_keys = {
             sport_key_for_week(infer_current_week_index(window_start)),
             sport_key_for_week(infer_current_week_index(window_end)),
         }
         caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
-    else:  # week_label
+    else:  # week label
         week_index   = current_week
         window_start, window_end = nfl_week_window_utc(week_index, now_utc)
         sport_keys   = {sport_key_for_week(week_index)}
@@ -495,32 +455,13 @@ def run_app():
     # --- Inputs ---
     c1, c2, c3 = st.columns(3)
     with c1:
-        weekly_bankroll = st.number_input(
-            "Weekly Bankroll ($)",
-            min_value=0.0,
-            value=1000.0,
-            step=50.0,
-            help="Total budget for the week."
-        )
+        weekly_bankroll = st.number_input("Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0)
     with c2:
-        kelly_factor = st.slider(
-            "Kelly Factor (0.0–1.0)",
-            min_value=0.0, max_value=1.0,
-            value=0.5, step=0.05,
-            help="Controls bet size. Lower = safer, higher = riskier."
-        )
+        kelly_factor = st.slider("Kelly Factor (0.0–1.0)", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
     with c3:
-        min_ev = st.number_input(
-            "Minimum EV% to display",
-            value=0.0, step=0.5,
-            help="Higher threshold = fewer, stronger plays."
-        )
+        min_ev = st.number_input("Minimum EV% to display", value=0.0, step=0.5)
 
-    show_all = st.checkbox(
-        "Show all games (ignore EV% filter)",
-        value=False,
-        help="Tick to display every matchup regardless of EV%."
-    )
+    show_all = st.checkbox("Show all games (ignore EV% filter)", value=False)
 
     # --- Fetch odds (record exact pull time in Pacific) ---
     pulled_at_local = datetime.now(PACIFIC)
@@ -619,9 +560,7 @@ def run_app():
     show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
 
     st.subheader("Games & EV")
-    st.caption(
-        f"Window: {caption_label}  |  Data pulled: {pulled_at_local.strftime('%b %d, %Y %I:%M %p %Z')}"
-    )
+    st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_local.strftime('%b %d, %Y %I:%M %p %Z')}")
     st.dataframe(
         show[["Date","Game","Pick","Best Odds","Best Book","Implied Probability","EV%","Kelly %","Stake ($)"]],
         use_container_width=True, hide_index=True,
