@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 # =======================
-# Auth (Supabase) — stable, single-submit forms
+# Auth (Supabase)
 # =======================
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
@@ -20,14 +20,14 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# Reattach session tokens if we have them in Streamlit state
+# Reattach session tokens if present
 if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"):
     supabase.auth.set_session(
         access_token=st.session_state.sb_access_token,
         refresh_token=st.session_state.sb_refresh_token,
     )
 
-# ===== BRANDING (clean, no debug) =====
+# ===== BRANDING =====
 ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
 
@@ -70,84 +70,11 @@ SIDEBAR_W = 320
 if LOGO_PATH:
     st.image(str(LOGO_PATH), width=HEADER_W)
 
-with st.sidebar:
-    if LOGO_PATH:
-        st.image(str(LOGO_PATH), width=SIDEBAR_W)
-    else:
-        st.write("Fair Value Betting")
-# ===== END BRANDING =====
-
-# --- Sidebar ---
-st.sidebar.divider()
-
-with st.sidebar.expander("How to use", expanded=False):
-    st.markdown(
-        """
-1. **Pick a Window**: **Today**, **NFL Week X**, or **Next 7 Days**.
-2. **Set inputs**:
-   - **Weekly Bankroll ($)** — your total budget for the week.
-   - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
-   - **Minimum EV%** — filter picks above this expected value.
-3. **Review the table**:
-   - **Implied Probability** = de-vigged market consensus.
-   - **EV%** = edge versus best available odds.
-   - **Stake ($)** = recommended bet size based on Kelly & bankroll.
-        """
-    )
-
-with st.sidebar.expander("Glossary", expanded=False):
-    st.markdown(
-        """
-**EV% (Expected Value %)** — Long-run edge if probabilities are accurate.  
-**Kelly Factor** — Scales bet size to edge; 1.0 = full Kelly, 0.5 = half Kelly.
-        """
-    )
-
-with st.sidebar.expander("Feedback", expanded=False):
-    user = None
-    try:
-        user = getattr(st.session_state.get("sb_session", None), "user", None)
-    except Exception:
-        user = None
-
-    if not user:
-        st.info("You must be signed in to leave feedback.")
-    else:
-        with st.form("feedback_form", clear_on_submit=True):
-            full_name = (user.user_metadata or {}).get("full_name") or (user.user_metadata or {}).get("name") or ""
-            email_addr = getattr(user, "email", "") or (user.user_metadata or {}).get("email", "")
-            st.markdown(f"**Submitting as:** {full_name or 'Unknown'}  \n**Email:** {email_addr or 'Unknown'}")
-            feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
-            submitted = st.form_submit_button("Submit Feedback")
-
-        if submitted:
-            txt = (feedback_text or "").strip()
-            if not txt:
-                st.warning("Please enter feedback before submitting.")
-            else:
-                try:
-                    payload = {
-                        "message": txt,
-                        "name": full_name.strip() or None,
-                        "email": (email_addr or "").strip() or None,
-                        "user_id": user.id,
-                    }
-                    supabase.table("feedback").insert(payload).execute()
-                    st.success("Thanks for your feedback!")
-                except Exception as e:
-                    st.error(f"Error saving feedback: {e}")
-
-with st.sidebar.expander("Disclaimer", expanded=False):
-    st.markdown(
-        """
-**Fair Value Sports** is for **education and entertainment** only — not financial or betting advice.
-        """
-    )
-
 # ---- Session state priming ----
 st.session_state.setdefault("sb_session", None)
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
+st.session_state.setdefault("show_auth", False)
 
 def _store_session(sess):
     st.session_state.sb_session = sess
@@ -197,6 +124,7 @@ def auth_view():
                 if sess:
                     _store_session(sess)
                     st.success("Signed in.")
+                    st.session_state.show_auth = False
                     st.rerun()
                 else:
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
@@ -228,12 +156,102 @@ def auth_view():
                 except Exception as e:
                     st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
 
-def require_auth():
-    if st.session_state.sb_session is None:
-        _maybe_refresh_session()
-    if st.session_state.sb_session is None:
-        auth_view()
-        st.stop()
+authed = st.session_state.sb_session is not None
+
+# --- Sidebar ---
+with st.sidebar:
+    if LOGO_PATH:
+        st.image(str(LOGO_PATH), width=SIDEBAR_W)
+    else:
+        st.write("Fair Value Betting")
+
+st.sidebar.divider()
+
+# Account block (concise)
+with st.sidebar:
+    if authed:
+        u = getattr(st.session_state.sb_session, "user", None)
+        user_email = getattr(u, "email", None) or (getattr(u, "user_metadata", {}) or {}).get("email")
+        st.success(f"Signed in{f' as {user_email}' if user_email else ''}.")
+        if st.button("Log out"):
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            _clear_session()
+            st.rerun()
+    else:
+        st.info("Free full access in September—create a free account to unlock filters and sorting.")
+        if st.button("Sign in / Create account"):
+            st.session_state.show_auth = True
+
+    if st.session_state.show_auth and not authed:
+        with st.expander("Account", expanded=True):
+            auth_view()
+
+with st.sidebar.expander("How to use", expanded=False):
+    st.markdown(
+        """
+1. **Pick a Window**: **Today**, **NFL Week X**, or **Next 7 Days**.
+2. **Set inputs**:
+   - **Weekly Bankroll ($)** — your total budget for the week.
+   - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
+   - **Minimum EV%** — filter picks above this expected value.
+3. **Review the table**:
+   - **Fair Win %** = de-vigged market consensus.
+   - **EV%** = edge versus best available odds.
+   - **Stake ($)** = recommended bet size based on Kelly & bankroll.
+        """
+    )
+
+with st.sidebar.expander("Glossary", expanded=False):
+    st.markdown(
+        """
+**EV% (Expected Value %)** — How favorable the offered price is versus the fair baseline (no-vig).  
+**Kelly Factor** — Scales bet size to edge; 1.0 = full Kelly, 0.5 = half Kelly.
+        """
+    )
+
+with st.sidebar.expander("Feedback", expanded=False):
+    user = None
+    try:
+        user = getattr(st.session_state.get("sb_session", None), "user", None)
+    except Exception:
+        user = None
+
+    if not user:
+        st.info("You must be signed in to leave feedback.")
+    else:
+        with st.form("feedback_form", clear_on_submit=True):
+            full_name = (user.user_metadata or {}).get("full_name") or (user.user_metadata or {}).get("name") or ""
+            email_addr = getattr(user, "email", "") or (user.user_metadata or {}).get("email", "")
+            st.markdown(f"**Submitting as:** {full_name or 'Unknown'}  \n**Email:** {email_addr or 'Unknown'}")
+            feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
+            submitted = st.form_submit_button("Submit Feedback")
+
+        if submitted:
+            txt = (feedback_text or "").strip()
+            if not txt:
+                st.warning("Please enter feedback before submitting.")
+            else:
+                try:
+                    payload = {
+                        "message": txt,
+                        "name": full_name.strip() or None,
+                        "email": (email_addr or "").strip() or None,
+                        "user_id": user.id,
+                    }
+                    supabase.table("feedback").insert(payload).execute()
+                    st.success("Thanks for your feedback!")
+                except Exception as e:
+                    st.error(f"Error saving feedback: {e}")
+
+with st.sidebar.expander("Disclaimer", expanded=False):
+    st.markdown(
+        """
+**Fair Value Betting** is for **education and entertainment** only — not financial or betting advice.
+        """
+    )
 
 # =======================
 # NFL app config
@@ -241,6 +259,7 @@ def require_auth():
 API_BASE = "https://api.the-odds-api.com/v4"
 API_KEY  = os.getenv("ODDS_API_KEY", "")
 EASTERN = ZoneInfo("America/New_York")
+PACIFIC = ZoneInfo("America/Los_Angeles")  # used for window math only (label unchanged per your preference)
 
 # ---------- helpers ----------
 def american_to_implied_prob(odds):
@@ -278,7 +297,7 @@ def parse_iso_dt_utc(iso_s: str):
     except Exception:
         return None
 
-def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
+def fmt_date_et_str(iso_s: str, snap_odd_minutes: bool = True):
     dt = parse_iso_dt_utc(iso_s)
     if not dt:
         return None
@@ -293,7 +312,6 @@ def fmt_date_est_str(iso_s: str, snap_odd_minutes: bool = True):
     tm  = et.strftime("%I:%M %p").lstrip("0")
     return f"{dow} {md} {tm} ET"
 
-# ---- NFL week helpers (ET-anchored, current-year opener; Week 0 until opener) ----
 def thursday_after_labor_day_utc(year: int) -> datetime:
     """Thursday after Labor Day at 00:00 ET, converted to UTC."""
     d = datetime(year, 9, 1, tzinfo=EASTERN)
@@ -389,8 +407,24 @@ def best_prices(df_evt_books: pd.DataFrame):
     ].rename(columns={"book":"away_book"})
     return pd.merge(home_best, away_best, on=["event_id","home_team","away_team"], how="outer")
 
+# --- Cached odds fetch (60s TTL) ---
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_odds_payload(sport_key: str, params: dict):
+    url = f"{API_BASE}/sports/{sport_key}/odds"
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        if resp.status_code == 429:
+            raise RuntimeError("Rate limited by odds API. Please try again shortly.")
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected API payload.")
+        return data
+    except Exception as e:
+        raise
+
 # =======================
-# Main app
+# Main app (soft-gated)
 # =======================
 def run_app():
     if not API_KEY:
@@ -398,30 +432,12 @@ def run_app():
         st.stop()
 
     st.title("NFL Expected Value Model")
-    region = "us"
 
-    PACIFIC = ZoneInfo("America/Los_Angeles")
+    # Top nudge
+    if not authed:
+        st.info("Preview mode: example rows shown. **Sign in** to adjust filters and sort.")
 
-    def _short_md(dt_utc):
-        local = dt_utc.astimezone(PACIFIC)
-        return f"{local.month}/{local.day}"
-
-    def _short_day_md(dt_utc):
-        local = dt_utc.astimezone(PACIFIC)
-        return f"{local.strftime('%a')} {local.month}/{local.day}"
-
-    # "Next 7 Days" that actually shows today + next 8 days (so next Thursday is always included)
-    def window_next_7_days(now_utc, tz=PACIFIC):
-        """
-        Start = today 00:00 local
-        End   = 8 days later, 23:59:59 local  (inclusive)
-        """
-        local = now_utc.astimezone(tz)
-        start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_local = (start_local + timedelta(days=8)).replace(hour=23, minute=59, second=59, microsecond=0)
-        return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
-
-    # --- Window dropdown ---
+    # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
     current_week = infer_current_week_index(now_utc)
     week_label = "NFL Preseason" if current_week == 0 else f"NFL Week {current_week}"
@@ -432,73 +448,95 @@ def run_app():
         window_options,
         index=1,
         key="window_choice",
-        help="Choose a time window. “Next 7 Days” shows games from today through the next full week."
+        help="Choose a time window. “Next 7 Days” shows games from today through the next full week.",
+        disabled=not authed,
     )
 
     # Determine time window + sport key(s)
+    # (Window math still uses PACIFIC per your original logic; label stays “Next 7 Days”)
+    def _short_md(dt_utc):
+        local = dt_utc.astimezone(EASTERN)
+        return f"{local.month}/{local.day}"
+
+    def _short_day_md(dt_utc):
+        local = dt_utc.astimezone(EASTERN)
+        return f"{local.strftime('%a')} {local.month}/{local.day}"
+
+    def window_next_7_days(now_utc, tz=PACIFIC):
+        local = now_utc.astimezone(tz)
+        start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = (start_local + timedelta(days=8)).replace(hour=23, minute=59, second=59, microsecond=0)
+        return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
     if window_choice == "Today":
         now_local = datetime.now(PACIFIC)
         window_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         window_end   = (window_start + timedelta(days=1)) - timedelta(seconds=1)
         sport_keys   = {sport_key_for_week(current_week)}
         caption_label = f"Today ({_short_md(window_start)})"
-
     elif window_choice == "Next 7 Days":
         window_start, window_end = window_next_7_days(now_utc, tz=PACIFIC)
-        # Union of sport keys at edges to cover preseason ↔ regular
         sport_keys = {
             sport_key_for_week(infer_current_week_index(window_start)),
             sport_key_for_week(infer_current_week_index(window_end)),
         }
         caption_label = f"{_short_day_md(window_start)} – {_short_day_md(window_end)}"
-
-    else:  # week label
+    else:
         week_index   = current_week
         window_start, window_end = nfl_week_window_utc(week_index, now_utc)
         sport_keys   = {sport_key_for_week(week_index)}
         caption_label = f"{week_label} — {_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
-    # --- Inputs ---
+    # --- Inputs (disabled until signed in) ---
+    st.subheader("Inputs")
     c1, c2, c3 = st.columns(3)
     with c1:
         weekly_bankroll = st.number_input(
             "Weekly Bankroll ($)",
             min_value=0.0, value=1000.0, step=50.0,
-            help="Total budget for this week."
+            help="Total budget for this week.",
+            disabled=not authed,
+            key="weekly_bankroll",
         )
     with c2:
         kelly_factor = st.slider(
             "Kelly Factor (0.0–1.0)",
             min_value=0.0, max_value=1.0, value=0.5, step=0.05,
-            help="Controls bet size. Lower = safer; higher = riskier."
+            help="Controls bet size. Lower = safer; higher = riskier.",
+            disabled=not authed,
+            key="kelly_factor",
         )
     with c3:
         min_ev = st.number_input(
             "Minimum EV% to display",
             value=0.0, step=0.5,
-            help="Filter out plays below this expected value."
+            help="Filter out plays below this expected value.",
+            disabled=not authed,
+            key="min_ev",
         )
 
     show_all = st.checkbox(
         "Show all games (ignore EV% filter)",
         value=False,
-        help="Display every matchup regardless of EV%."
+        help="Display every matchup regardless of EV%.",
+        disabled=not authed,
+        key="show_all",
     )
 
-    # --- Fetch odds (record exact pull time in Pacific) ---
-    pulled_at_local = datetime.now(PACIFIC)
-    params = {"apiKey": API_KEY, "regions": region, "markets": "h2h", "oddsFormat": "american"}
+    # --- Fetch odds (cached), record exact pull time in ET ---
+    params = {"apiKey": API_KEY, "regions": "us", "markets": "h2h", "oddsFormat": "american"}
 
     events = []
     try:
         for key in sorted(sport_keys):
-            resp = requests.get(f"{API_BASE}/sports/{key}/odds", params=params, timeout=30)
-            resp.raise_for_status()
-            payload = resp.json()
-            if isinstance(payload, list):
-                events.extend(payload)
+            payload = fetch_odds_payload(key, params)
+            events.extend(payload)
     except Exception as e:
-        st.error(f"API error: {e}")
+        msg = str(e)
+        if "Rate limited" in msg or "429" in msg:
+            st.warning("Rate limit hit. Please try again shortly.")
+            st.stop()
+        st.error(f"API error: {msg}")
         st.stop()
 
     if not isinstance(events, list) or not events:
@@ -527,7 +565,7 @@ def run_app():
     # Rows for display
     rows = []
     for _, r in merged.iterrows():
-        date_str = fmt_date_est_str(r.get("commence_time"))
+        date_str = fmt_date_et_str(r.get("commence_time"))
         game_label = f"{r['home_team']} vs {r['away_team']}"
 
         # Home
@@ -536,10 +574,11 @@ def run_app():
             ev_pct = expected_value_pct(fair_p, price)
             kelly = kelly_fraction(fair_p, price)
             rows.append({
-                "Date": date_str, "Game": game_label, "Pick": r["home_team"],
+                "Game": game_label, "Pick": r["home_team"],
                 "Best Odds": price, "Best Book": r.get("home_book"),
-                "Implied Probability": fair_p, "EV%": ev_pct, "Kelly %": kelly*100.0,
-                "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
+                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,  # store as raw; format later
+                "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                "Date": date_str
             })
 
         # Away
@@ -548,10 +587,11 @@ def run_app():
             ev_pct = expected_value_pct(fair_p, price)
             kelly = kelly_fraction(fair_p, price)
             rows.append({
-                "Date": date_str, "Game": game_label, "Pick": r["away_team"],
+                "Game": game_label, "Pick": r["away_team"],
                 "Best Odds": price, "Best Book": r.get("away_book"),
-                "Implied Probability": fair_p, "EV%": ev_pct, "Kelly %": kelly*100.0,
-                "Stake ($)": round(weekly_bankroll * kelly_factor * kelly, 2)
+                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                "Date": date_str
             })
 
     df = pd.DataFrame(rows)
@@ -559,15 +599,17 @@ def run_app():
         st.info("No sides available.")
         st.stop()
 
-    if not show_all:
+    # Apply EV filter only when authed
+    if authed and not show_all:
         df = df[df["EV%"] >= float(min_ev)].reset_index(drop=True)
         if df.empty:
             st.info("No games meet the EV% filter for this window.")
             st.stop()
 
-    df = df.sort_values(["EV%","Implied Probability"], ascending=[False, False]).reset_index(drop=True)
+    # Sort strongest first (static for preview; interactive for authed)
+    df = df.sort_values(["EV%","Fair Win %"], ascending=[False, False]).reset_index(drop=True)
 
-    # Pretty display
+    # Pretty display helpers
     def fmt_odds(o):
         try:
             o = int(o)
@@ -575,39 +617,54 @@ def run_app():
         except Exception:
             return str(o)
 
+    def fmt_ev(val) -> str:
+        try:
+            return f"{val:+.1f}%"
+        except Exception:
+            return str(val)
+
+    # Prepare view df
     show = df.copy()
     show["Best Odds"] = show["Best Odds"].map(fmt_odds)
     show["Best Book"] = show["Best Book"].astype(str)
-    show["Implied Probability"] = show["Implied Probability"].map(lambda x: f"{x*100:.1f}%")
-    show["Kelly %"] = show["Kelly %"].map(lambda x: f"{x:.2f}")
+    show["Fair Win %"] = show["Fair Win %"].map(lambda x: f"{x*100:.1f}%")
+    show["EV%"] = show["EV%"].map(fmt_ev)
+    show["Kelly (u)"] = show["Kelly (u)"].map(lambda x: f"{x:.2f}u")
 
     st.subheader("Games & EV")
-    st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_local.strftime('%b %d, %Y %I:%M %p %Z')}")
-    st.dataframe(
-        show[["Date","Game","Pick","Best Odds","Best Book","Implied Probability","EV%","Kelly %","Stake ($)"]],
-        use_container_width=True, hide_index=True,
-    )
+    pulled_at_et = datetime.now(EASTERN)
+    st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_et.strftime('%b %d, %Y %I:%M %p ET')}  |  All times ET. Fair Win % is no-vig.")
 
-    total_stake = float(df["Stake ($)"].sum())
-    util_pct = 100.0 * (total_stake / weekly_bankroll) if weekly_bankroll > 0 else 0.0
-    color = "green" if util_pct < 50 else ("orange" if util_pct < 70 else "red")
+    columns_order = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+
+    if authed:
+        # Interactive view
+        st.dataframe(
+            show[columns_order],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        # Static, non-sortable preview
+        st.table(show[columns_order])
+
+    # Utilization summary (uses actual bankroll if authed, else preview math)
+    bankroll_used = float(df["Stake ($)"].sum())
+    wk_bankroll = weekly_bankroll if authed else 1000.0
+    util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
+
+    if util_pct < 50:
+        util_color, util_label = "#166534", "Low"
+    elif util_pct < 70:
+        util_color, util_label = "#a16207", "Moderate"
+    else:
+        util_color, util_label = "#b91c1c", "High"
+
     st.markdown(
-        f"**Total Suggested Stake:** ${total_stake:,.2f}  |  **Utilization:** "
-        f"<span style='color:{color}'>{util_pct:.1f}% of weekly bankroll</span>",
+        f"**Total Suggested Stake:** ${bankroll_used:,.2f}  |  **Utilization:** "
+        f"<span style='color:{util_color}'>{util_pct:.1f}%</span> ({util_label}) of weekly bankroll",
         unsafe_allow_html=True
     )
 
-# ===== Require login, then run app =====
-require_auth()
-
-with st.sidebar:
-    st.write("Logged in")
-    if st.button("Log out"):
-        try:
-            supabase.auth.sign_out()
-        except Exception:
-            pass
-        st.session_state.sb_session = None
-        st.rerun()
-
+# ---- Run app (soft gate; no hard require_auth) ----
 run_app()
