@@ -435,7 +435,7 @@ def run_app():
 
     # Top nudge
     if not authed:
-        st.info("Preview Mode: showing today's top pick - **Sign in** to see all picks, filters and sorting.")
+        st.info("Preview Mode: showing today's top pick - **Sign in** to see all picks, filters, and sorting.")
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
