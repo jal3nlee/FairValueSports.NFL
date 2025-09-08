@@ -75,7 +75,7 @@ st.session_state.setdefault("sb_session", None)
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
 st.session_state.setdefault("show_auth", False)
-st.session_state.setdefault("expand_account", False)  # <<< added >>>
+st.session_state.setdefault("expand_account", False)  # used to auto-open Account expander
 
 def _store_session(sess):
     st.session_state.sb_session = sess
@@ -100,35 +100,6 @@ def _maybe_refresh_session():
             _clear_session()
 
 _maybe_refresh_session()
-
-# --- Handle query params to open sidebar auth panel ---  # <<< added >>>
-def _params_open_auth():
-    try:
-        qp = st.query_params  # Streamlit ≥1.30
-        auth_param = qp.get("auth")
-        panel_param = qp.get("panel")
-        if (isinstance(auth_param, str) and auth_param == "1") or (isinstance(auth_param, list) and "1" in auth_param):
-            st.session_state.show_auth = True
-            st.session_state.expand_account = True
-        if (isinstance(panel_param, str) and panel_param.lower() == "account") or (
-            isinstance(panel_param, list) and any(p.lower() == "account" for p in panel_param)
-        ):
-            st.session_state.expand_account = True
-    except Exception:
-        # Back-compat for older Streamlit
-        try:
-            qp_legacy = st.experimental_get_query_params()
-            if "auth" in qp_legacy and ("1" in qp_legacy["auth"] or qp_legacy["auth"] == "1"):
-                st.session_state.show_auth = True
-                st.session_state.expand_account = True
-            if "panel" in qp_legacy and (
-                "account" in [p.lower() for p in qp_legacy["panel"]] or qp_legacy["panel"] == "account"
-            ):
-                st.session_state.expand_account = True
-        except Exception:
-            pass
-
-_params_open_auth()  # <<< added >>>
 
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
@@ -220,7 +191,7 @@ with st.sidebar:
 
     if st.session_state.show_auth and not authed:
         # Auto-expand based on flag
-        with st.expander("Account", expanded=st.session_state.get("expand_account", False)):  # <<< modified >>>
+        with st.expander("Account", expanded=st.session_state.get("expand_account", False)):
             auth_view()
 
 with st.sidebar.expander("How to use", expanded=False):
@@ -467,18 +438,16 @@ def run_app():
 
     st.title("NFL Expected Value Model")
 
-    # Top nudge (HTML so link opens same tab and triggers sidebar+expander)
+    # Top nudge — button opens sidebar auth expander (no URL, no new tab)
     if not authed:
-        st.markdown(
-            """
-<div style="border-left:.25rem solid #0369a1;background:#eff6ff;padding:.75rem 1rem;border-radius:.25rem;">
-  Preview mode: example rows shown.
-  <a href="?auth=1&panel=account" target="_self" style="font-weight:600;">Sign in</a>
-  to adjust filters and sort.
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+        col1, col2 = st.columns([1, 0.22])
+        with col1:
+            st.info("Preview mode: example rows shown. Sign in to adjust filters and sort.")
+        with col2:
+            if st.button("Sign in", use_container_width=True):
+                st.session_state.show_auth = True
+                st.session_state.expand_account = True
+                st.rerun()
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
@@ -496,7 +465,6 @@ def run_app():
     )
 
     # Determine time window + sport key(s)
-    # (Window math still uses PACIFIC per your original logic; label stays “Next 7 Days”)
     def _short_md(dt_utc):
         local = dt_utc.astimezone(EASTERN)
         return f"{local.month}/{local.day}"
@@ -681,17 +649,15 @@ def run_app():
     columns_order = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
 
     if authed:
-        # Interactive view
         st.dataframe(
             show[columns_order],
             use_container_width=True,
             hide_index=True,
         )
     else:
-        # Static, non-sortable preview
         st.table(show[columns_order])
 
-    # Utilization summary (uses actual bankroll if authed, else preview math)
+    # Utilization summary
     bankroll_used = float(df["Stake ($)"].sum())
     wk_bankroll = weekly_bankroll if authed else 1000.0
     util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
