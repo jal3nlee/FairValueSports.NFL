@@ -75,6 +75,7 @@ st.session_state.setdefault("sb_session", None)
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
 st.session_state.setdefault("show_auth", False)
+st.session_state.setdefault("expand_account", False)  # <<< added >>>
 
 def _store_session(sess):
     st.session_state.sb_session = sess
@@ -99,6 +100,35 @@ def _maybe_refresh_session():
             _clear_session()
 
 _maybe_refresh_session()
+
+# --- Handle query params to open sidebar auth panel ---  # <<< added >>>
+def _params_open_auth():
+    try:
+        qp = st.query_params  # Streamlit ≥1.30
+        auth_param = qp.get("auth")
+        panel_param = qp.get("panel")
+        if (isinstance(auth_param, str) and auth_param == "1") or (isinstance(auth_param, list) and "1" in auth_param):
+            st.session_state.show_auth = True
+            st.session_state.expand_account = True
+        if (isinstance(panel_param, str) and panel_param.lower() == "account") or (
+            isinstance(panel_param, list) and any(p.lower() == "account" for p in panel_param)
+        ):
+            st.session_state.expand_account = True
+    except Exception:
+        # Back-compat for older Streamlit
+        try:
+            qp_legacy = st.experimental_get_query_params()
+            if "auth" in qp_legacy and ("1" in qp_legacy["auth"] or qp_legacy["auth"] == "1"):
+                st.session_state.show_auth = True
+                st.session_state.expand_account = True
+            if "panel" in qp_legacy and (
+                "account" in [p.lower() for p in qp_legacy["panel"]] or qp_legacy["panel"] == "account"
+            ):
+                st.session_state.expand_account = True
+        except Exception:
+            pass
+
+_params_open_auth()  # <<< added >>>
 
 def auth_view():
     tabs = st.tabs(["Sign in", "Create account"])
@@ -125,6 +155,7 @@ def auth_view():
                     _store_session(sess)
                     st.success("Signed in.")
                     st.session_state.show_auth = False
+                    st.session_state.expand_account = False  # close on success
                     st.rerun()
                 else:
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
@@ -184,9 +215,12 @@ with st.sidebar:
         st.info("Free full access in September—create a free account to unlock filters and sorting.")
         if st.button("Sign in / Create account"):
             st.session_state.show_auth = True
+            st.session_state.expand_account = True
+            st.rerun()
 
     if st.session_state.show_auth and not authed:
-        with st.expander("Account", expanded=True):
+        # Auto-expand based on flag
+        with st.expander("Account", expanded=st.session_state.get("expand_account", False)):  # <<< modified >>>
             auth_view()
 
 with st.sidebar.expander("How to use", expanded=False):
@@ -433,9 +467,18 @@ def run_app():
 
     st.title("NFL Expected Value Model")
 
-    # Top nudge
+    # Top nudge (HTML so link opens same tab and triggers sidebar+expander)
     if not authed:
-        st.info('Preview mode: example rows shown. [Sign in](?auth=1) to adjust filters and sort.')
+        st.markdown(
+            """
+<div style="border-left:.25rem solid #0369a1;background:#eff6ff;padding:.75rem 1rem;border-radius:.25rem;">
+  Preview mode: example rows shown.
+  <a href="?auth=1&panel=account" target="_self" style="font-weight:600;">Sign in</a>
+  to adjust filters and sort.
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
