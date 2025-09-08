@@ -285,8 +285,8 @@ def kelly_fraction(true_prob: float, american_odds: int) -> float:
         return 0.0
     return max(0.0, (b*p - q) / b)
 
-def devig_two_way(p_home: float, p_away: float):
-    a = (p_home or 0.0); b = (p_away or 0.0); s = a + b
+def devig_two_way(p_a: float, p_b: float):
+    a = (p_a or 0.0); b = (p_b or 0.0); s = a + b
     if s <= 0:
         return None, None
     return a/s, b/s
@@ -353,7 +353,8 @@ def pretty_book_title(bm: dict) -> str:
     key = (bm.get("key") or "").replace("_", " ").title()
     return key or "Sportsbook"
 
-def build_market(events, selected_books=None):
+# ===== Builders for each market =====
+def build_market_h2h(events, selected_books=None) -> pd.DataFrame:
     rows = []
     for ev in events:
         home, away = ev.get("home_team"), ev.get("away_team")
@@ -377,7 +378,86 @@ def build_market(events, selected_books=None):
             })
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
-def compute_consensus_fair_probs(df_evt_books: pd.DataFrame):
+def build_market_spreads(events, selected_books=None) -> pd.DataFrame:
+    """
+    Output rows at (event_id, line, book): home/away prices at that line.
+    """
+    rows = []
+    for ev in events:
+        home, away = ev.get("home_team"), ev.get("away_team")
+        eid, t0 = ev.get("id"), ev.get("commence_time")
+        for bm in ev.get("bookmakers", []):
+            if selected_books and bm.get("key") not in selected_books:
+                continue
+            for mk in bm.get("markets", []):
+                if mk.get("key") != "spreads":
+                    continue
+                # Collect prices per line
+                line_map = {}  # line -> {"home": price, "away": price}
+                for o in mk.get("outcomes", []):
+                    name = o.get("name","")
+                    price = o.get("price")
+                    line = o.get("point")
+                    if line is None:
+                        continue
+                    side = "home" if name == home else ("away" if name == away else None)
+                    if side is None:
+                        continue
+                    d = line_map.setdefault(float(line), {"home": None, "away": None})
+                    d[side] = price
+                for line, side_prices in line_map.items():
+                    if side_prices.get("home") is None and side_prices.get("away") is None:
+                        continue
+                    rows.append({
+                        "event_id": eid, "home_team": home, "away_team": away,
+                        "book": pretty_book_title(bm),
+                        "line": float(line),
+                        "home_price": side_prices.get("home"),
+                        "away_price": side_prices.get("away"),
+                        "commence_time": t0
+                    })
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+def build_market_totals(events, selected_books=None) -> pd.DataFrame:
+    """
+    Output rows at (event_id, total_line, book): over/under prices at that total.
+    """
+    rows = []
+    for ev in events:
+        home, away = ev.get("home_team"), ev.get("away_team")
+        eid, t0 = ev.get("id"), ev.get("commence_time")
+        for bm in ev.get("bookmakers", []):
+            if selected_books and bm.get("key") not in selected_books:
+                continue
+            for mk in bm.get("markets", []):
+                if mk.get("key") != "totals":
+                    continue
+                line_map = {}  # total -> {"over": price, "under": price}
+                for o in mk.get("outcomes", []):
+                    name = (o.get("name","") or "").lower()  # "Over" / "Under"
+                    price = o.get("price")
+                    line = o.get("point")
+                    if line is None:
+                        continue
+                    if name not in ("over","under"):
+                        continue
+                    d = line_map.setdefault(float(line), {"over": None, "under": None})
+                    d[name] = price
+                for total, side_prices in line_map.items():
+                    if side_prices.get("over") is None and side_prices.get("under") is None:
+                        continue
+                    rows.append({
+                        "event_id": eid, "home_team": home, "away_team": away,
+                        "book": pretty_book_title(bm),
+                        "total": float(total),
+                        "over_price": side_prices.get("over"),
+                        "under_price": side_prices.get("under"),
+                        "commence_time": t0
+                    })
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+# ===== Consensus / Best price per market =====
+def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
     if df_evt_books.empty:
         return pd.DataFrame()
     tmp = df_evt_books.copy()
@@ -394,7 +474,7 @@ def compute_consensus_fair_probs(df_evt_books: pd.DataFrame):
     )
     return agg
 
-def best_prices(df_evt_books: pd.DataFrame):
+def best_prices_h2h(df_evt_books: pd.DataFrame):
     if df_evt_books.empty:
         return pd.DataFrame(columns=["event_id","home_team","away_team","home_book","home_price","away_book","away_price"])
     home_best = df_evt_books.dropna(subset=["home_price"]).sort_values(
@@ -409,21 +489,85 @@ def best_prices(df_evt_books: pd.DataFrame):
     ].rename(columns={"book":"away_book"})
     return pd.merge(home_best, away_best, on=["event_id","home_team","away_team"], how="outer")
 
+def compute_consensus_fair_probs_spread(df_spreads: pd.DataFrame):
+    if df_spreads.empty:
+        return pd.DataFrame()
+    tmp = df_spreads.copy()
+    tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
+    tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
+    agg = tmp.groupby(["event_id","home_team","away_team","line"]).agg(
+        home_imp_vig=("home_imp_vig","mean"),
+        away_imp_vig=("away_imp_vig","mean"),
+        commence_time=("commence_time","first")
+    ).reset_index()
+    agg[["home_fair","away_fair"]] = agg.apply(
+        lambda r: pd.Series(devig_two_way(r["home_imp_vig"], r["away_imp_vig"])),
+        axis=1
+    )
+    return agg
+
+def best_prices_spread(df_spreads: pd.DataFrame):
+    """
+    Best price per event & line (book's native line). We keep the line with each best price.
+    """
+    if df_spreads.empty:
+        return pd.DataFrame()
+    home_best = df_spreads.dropna(subset=["home_price"]).sort_values(
+        ["event_id","line","home_price"], ascending=[True, True, False]
+    ).groupby(["event_id","home_team","away_team","line"]).first().reset_index()[
+        ["event_id","home_team","away_team","line","book","home_price"]
+    ].rename(columns={"book":"home_book"})
+    away_best = df_spreads.dropna(subset=["away_price"]).sort_values(
+        ["event_id","line","away_price"], ascending=[True, True, False]
+    ).groupby(["event_id","home_team","away_team","line"]).first().reset_index()[
+        ["event_id","home_team","away_team","line","book","away_price"]
+    ].rename(columns={"book":"away_book"})
+    return pd.merge(home_best, away_best, on=["event_id","home_team","away_team","line"], how="outer")
+
+def compute_consensus_fair_probs_totals(df_totals: pd.DataFrame):
+    if df_totals.empty:
+        return pd.DataFrame()
+    tmp = df_totals.copy()
+    tmp["over_imp_vig"]  = tmp["over_price"].apply(american_to_implied_prob)
+    tmp["under_imp_vig"] = tmp["under_price"].apply(american_to_implied_prob)
+    agg = tmp.groupby(["event_id","home_team","away_team","total"]).agg(
+        over_imp_vig=("over_imp_vig","mean"),
+        under_imp_vig=("under_imp_vig","mean"),
+        commence_time=("commence_time","first")
+    ).reset_index()
+    agg[["over_fair","under_fair"]] = agg.apply(
+        lambda r: pd.Series(devig_two_way(r["over_imp_vig"], r["under_imp_vig"])),
+        axis=1
+    )
+    return agg
+
+def best_prices_totals(df_totals: pd.DataFrame):
+    if df_totals.empty:
+        return pd.DataFrame()
+    over_best = df_totals.dropna(subset=["over_price"]).sort_values(
+        ["event_id","total","over_price"], ascending=[True, True, False]
+    ).groupby(["event_id","home_team","away_team","total"]).first().reset_index()[
+        ["event_id","home_team","away_team","total","book","over_price"]
+    ].rename(columns={"book":"over_book"})
+    under_best = df_totals.dropna(subset=["under_price"]).sort_values(
+        ["event_id","total","under_price"], ascending=[True, True, False]
+    ).groupby(["event_id","home_team","away_team","total"]).first().reset_index()[
+        ["event_id","home_team","away_team","total","book","under_price"]
+    ].rename(columns={"book":"under_book"})
+    return pd.merge(over_best, under_best, on=["event_id","home_team","away_team","total"], how="outer")
+
 # --- Cached odds fetch (60s TTL) ---
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_odds_payload(sport_key: str, params: dict):
     url = f"{API_BASE}/sports/{sport_key}/odds"
-    try:
-        resp = requests.get(url, params=params, timeout=30)
-        if resp.status_code == 429:
-            raise RuntimeError("Rate limited by odds API. Please try again shortly.")
-        resp.raise_for_status()
-        data = resp.json()
-        if not isinstance(data, list):
-            raise RuntimeError("Unexpected API payload.")
-        return data
-    except Exception as e:
-        raise
+    resp = requests.get(url, params=params, timeout=30)
+    if resp.status_code == 429:
+        raise RuntimeError("Rate limited by odds API. Please try again shortly.")
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        raise RuntimeError("Unexpected API payload.")
+    return data
 
 # =======================
 # Main app (soft-gated)
@@ -438,6 +582,16 @@ def run_app():
     # Top nudge
     if not authed:
         st.info("Preview Mode: showing today's top pick - **Sign in** to see all picks, filters, and sorting.")
+
+    # --- Market Filter (Moneyline/Spread/Total) ---
+    market_choice = st.radio(
+        "Market",
+        ["Moneyline", "Spread", "Total"],
+        index=0,
+        horizontal=True,
+        help="Toggle between Moneyline, Spread, and Total markets.",
+        key="market_choice"
+    )
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
@@ -516,7 +670,6 @@ def run_app():
             key="min_ev",
         )
 
-    # NEW: Fair Win % threshold (for authed users)
     fair_win_min = st.slider(
         "Minimum Fair Win %",
         min_value=0.0, max_value=100.0, value=0.0, step=1.0,
@@ -533,14 +686,19 @@ def run_app():
         key="show_all",
     )
 
-    # --- Fetch odds (cached), record exact pull time in ET ---
-    params = {"apiKey": API_KEY, "regions": "us", "markets": "h2h", "oddsFormat": "american"}
-
-    events = []
-    try:
+    # --- Fetch odds for ALL THREE markets (cached) ---
+    def fetch_events_for_market(market_key: str):
+        params = {"apiKey": API_KEY, "regions": "us", "markets": market_key, "oddsFormat": "american"}
+        out = []
         for key in sorted(sport_keys):
             payload = fetch_odds_payload(key, params)
-            events.extend(payload)
+            out.extend(payload)
+        return out
+
+    try:
+        events_ml     = fetch_events_for_market("h2h")
+        events_spread = fetch_events_for_market("spreads")
+        events_total  = fetch_events_for_market("totals")
     except Exception as e:
         msg = str(e)
         if "Rate limited" in msg or "429" in msg:
@@ -549,80 +707,44 @@ def run_app():
         st.error(f"API error: {msg}")
         st.stop()
 
-    if not isinstance(events, list) or not events:
-        st.warning("No events returned.")
-        st.stop()
-
     # Filter to chosen window (commence_time is UTC)
-    events = [
-        ev for ev in events
-        if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end
-    ]
-    if not events:
+    def filter_window(evts):
+        return [
+            ev for ev in evts
+            if (dt := parse_iso_dt_utc(ev.get("commence_time"))) and window_start <= dt <= window_end
+        ]
+
+    events_ml     = filter_window(events_ml)
+    events_spread = filter_window(events_spread)
+    events_total  = filter_window(events_total)
+
+    if not any([events_ml, events_spread, events_total]):
         st.info(f"No NFL games in the selected window ({caption_label}).")
         st.stop()
 
-    # Build -> de-vig -> best
-    df_books = build_market(events, selected_books=None)
-    if df_books.empty:
-        st.warning("No odds available in this window.")
-        st.stop()
+    pulled_at_et = datetime.now(EASTERN)
+    st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_et.strftime('%b %d, %Y %I:%M %p ET')}  |  All times ET. Fair Win % is no-vig.")
 
-    cons = compute_consensus_fair_probs(df_books)
-    bests = best_prices(df_books)
-    merged = pd.merge(bests, cons, on=["event_id","home_team","away_team"], how="inner")
+    # ===== Build DataFrames per market =====
+    # Moneyline
+    df_ml_books = build_market_h2h(events_ml, selected_books=None)
+    df_ml_cons  = compute_consensus_fair_probs_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
+    df_ml_best  = best_prices_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
+    df_ml = pd.merge(df_ml_best, df_ml_cons, on=["event_id","home_team","away_team"], how="inner") if (not df_ml_best.empty and not df_ml_cons.empty) else pd.DataFrame()
 
-    # Rows for display
-    rows = []
-    for _, r in merged.iterrows():
-        date_str = fmt_date_et_str(r.get("commence_time"))
-        game_label = f"{r['home_team']} vs {r['away_team']}"
+    # Spread
+    df_spread_books = build_market_spreads(events_spread, selected_books=None)
+    df_spread_cons  = compute_consensus_fair_probs_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
+    df_spread_best  = best_prices_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
+    df_spread = pd.merge(df_spread_best, df_spread_cons, on=["event_id","home_team","away_team","line"], how="inner") if (not df_spread_best.empty and not df_spread_cons.empty) else pd.DataFrame()
 
-        # Home
-        if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
-            fair_p, price = float(r["home_fair"]), int(r["home_price"])
-            ev_pct = expected_value_pct(fair_p, price)
-            kelly = kelly_fraction(fair_p, price)
-            rows.append({
-                "Game": game_label, "Pick": r["home_team"],
-                "Best Odds": price, "Best Book": r.get("home_book"),
-                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                "Date": date_str
-            })
+    # Total
+    df_total_books = build_market_totals(events_total, selected_books=None)
+    df_total_cons  = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
+    df_total_best  = best_prices_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
+    df_total = pd.merge(df_total_best, df_total_cons, on=["event_id","home_team","away_team","total"], how="inner") if (not df_total_best.empty and not df_total_cons.empty) else pd.DataFrame()
 
-        # Away
-        if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
-            fair_p, price = float(r["away_fair"]), int(r["away_price"])
-            ev_pct = expected_value_pct(fair_p, price)
-            kelly = kelly_fraction(fair_p, price)
-            rows.append({
-                "Game": game_label, "Pick": r["away_team"],
-                "Best Odds": price, "Best Book": r.get("away_book"),
-                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                "Date": date_str
-            })
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        st.info("No sides available.")
-        st.stop()
-
-    # Apply Fair Win % + EV% filters only when authed (and not 'show all')
-    if authed and not show_all:
-        df = df[df["Fair Win %"] >= (float(fair_win_min) / 100.0)]
-        df = df[df["EV%"] >= float(min_ev)].reset_index(drop=True)
-        if df.empty:
-            st.info("No games meet the current Fair Win % and EV% filters for this window.")
-            st.stop()
-
-    # Sort strongest first (static for preview; interactive for authed)
-    df = df.sort_values(["EV%","Fair Win %"], ascending=[False, False]).reset_index(drop=True)
-    if not authed:
-        df = df.head(1)
-
-    # Pretty display helpers
+    # ===== Transform to display rows per market =====
     def fmt_odds(o):
         try:
             o = int(o)
@@ -636,48 +758,198 @@ def run_app():
         except Exception:
             return str(val)
 
-    # Prepare view df
-    show = df.copy()
-    show["Best Odds"] = show["Best Odds"].map(fmt_odds)
-    show["Best Book"] = show["Best Book"].astype(str)
-    show["Fair Win %"] = show["Fair Win %"].map(lambda x: f"{x*100:.1f}%")
-    show["EV%"] = show["EV%"].map(fmt_ev)
-    show["Kelly (u)"] = show["Kelly (u)"].map(lambda x: f"{x:.2f}u")
+    def make_rows_moneyline(df_in: pd.DataFrame):
+        rows = []
+        for _, r in df_in.iterrows():
+            date_str = fmt_date_et_str(r.get("commence_time"))
+            game_label = f"{r['home_team']} vs {r['away_team']}"
+            # Home
+            if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
+                fair_p, price = float(r["home_fair"]), int(r["home_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                rows.append({
+                    "Market": "Moneyline",
+                    "Game": game_label, "Pick": r["home_team"],
+                    "Descriptor": "",  # no line for moneyline
+                    "Best Odds": price, "Best Book": r.get("home_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+            # Away
+            if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
+                fair_p, price = float(r["away_fair"]), int(r["away_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                rows.append({
+                    "Market": "Moneyline",
+                    "Game": game_label, "Pick": r["away_team"],
+                    "Descriptor": "",
+                    "Best Odds": price, "Best Book": r.get("away_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+        return pd.DataFrame(rows)
+
+    def make_rows_spread(df_in: pd.DataFrame):
+        rows = []
+        for _, r in df_in.iterrows():
+            date_str = fmt_date_et_str(r.get("commence_time"))
+            game_label = f"{r['home_team']} vs {r['away_team']}"
+            line = float(r.get("line"))
+            # Home - line applies to home side (e.g., HOME -3.5)
+            if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
+                fair_p, price = float(r["home_fair"]), int(r["home_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                desc = f"{r['home_team']} {line:+g}"
+                rows.append({
+                    "Market": "Spread",
+                    "Game": game_label, "Pick": r["home_team"],
+                    "Descriptor": desc,
+                    "Best Odds": price, "Best Book": r.get("home_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+            # Away - inverse line
+            if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
+                fair_p, price = float(r["away_fair"]), int(r["away_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                desc = f"{r['away_team']} {(-line):+g}"
+                rows.append({
+                    "Market": "Spread",
+                    "Game": game_label, "Pick": r["away_team"],
+                    "Descriptor": desc,
+                    "Best Odds": price, "Best Book": r.get("away_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+        return pd.DataFrame(rows)
+
+    def make_rows_total(df_in: pd.DataFrame):
+        rows = []
+        for _, r in df_in.iterrows():
+            date_str = fmt_date_et_str(r.get("commence_time"))
+            game_label = f"{r['home_team']} vs {r['away_team']}"
+            total = float(r.get("total"))
+            # Over
+            if pd.notna(r.get("over_price")) and pd.notna(r.get("over_fair")):
+                fair_p, price = float(r["over_fair"]), int(r["over_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                desc = f"Over {total:g}"
+                rows.append({
+                    "Market": "Total",
+                    "Game": game_label, "Pick": "Over",
+                    "Descriptor": desc,
+                    "Best Odds": price, "Best Book": r.get("over_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+            # Under
+            if pd.notna(r.get("under_price")) and pd.notna(r.get("under_fair")):
+                fair_p, price = float(r["under_fair"]), int(r["under_price"])
+                ev_pct = expected_value_pct(fair_p, price)
+                kelly = kelly_fraction(fair_p, price)
+                desc = f"Under {total:g}"
+                rows.append({
+                    "Market": "Total",
+                    "Game": game_label, "Pick": "Under",
+                    "Descriptor": desc,
+                    "Best Odds": price, "Best Book": r.get("under_book"),
+                    "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
+                    "Date": date_str
+                })
+        return pd.DataFrame(rows)
+
+    # Build per-market view tables
+    tbl_moneyline = make_rows_moneyline(df_ml)   if not df_ml.empty   else pd.DataFrame()
+    tbl_spread    = make_rows_spread(df_spread)  if not df_spread.empty else pd.DataFrame()
+    tbl_total     = make_rows_total(df_total)    if not df_total.empty  else pd.DataFrame()
+
+    # Apply filters (auth-gated) to the active market only
+    def apply_filters(df_market: pd.DataFrame) -> pd.DataFrame:
+        if df_market.empty:
+            return df_market
+        out = df_market.copy()
+        if authed and not show_all:
+            out = out[out["Fair Win %"] >= (float(fair_win_min) / 100.0)]
+            out = out[out["EV%"] >= float(min_ev)]
+        out = out.sort_values(["EV%","Fair Win %"], ascending=[False, False]).reset_index(drop=True)
+        if not authed:
+            out = out.head(1)
+        # Pretty formatting
+        out["Best Odds"] = out["Best Odds"].map(fmt_odds)
+        out["Best Book"] = out["Best Book"].astype(str)
+        out["Fair Win %"] = out["Fair Win %"].map(lambda x: f"{x*100:.1f}%")
+        out["EV%"] = out["EV%"].map(fmt_ev)
+        out["Kelly (u)"] = out["Kelly (u)"].map(lambda x: f"{x:.2f}u")
+        return out
+
+    columns_order = ["Game","Pick","Descriptor","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
 
     st.subheader("Games & EV")
-    pulled_at_et = datetime.now(EASTERN)
-    st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_et.strftime('%b %d, %Y %I:%M %p ET')}  |  All times ET. Fair Win % is no-vig.")
 
-    columns_order = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+    if market_choice == "Moneyline":
+        to_show = apply_filters(tbl_moneyline)
+        if to_show.empty:
+            st.info("No moneyline opportunities meet the current filters.")
+        else:
+            if authed:
+                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+            else:
+                st.table(to_show[columns_order])
 
-    if authed:
-        # Interactive view
-        st.dataframe(
-            show[columns_order],
-            use_container_width=True,
-            hide_index=True,
+    elif market_choice == "Spread":
+        to_show = apply_filters(tbl_spread)
+        if to_show.empty:
+            st.info("No spread opportunities meet the current filters.")
+        else:
+            if authed:
+                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+            else:
+                st.table(to_show[columns_order])
+
+    else:  # Total
+        to_show = apply_filters(tbl_total)
+        if to_show.empty:
+            st.info("No total opportunities meet the current filters.")
+        else:
+            if authed:
+                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+            else:
+                st.table(to_show[columns_order])
+
+    # Utilization summary based on the ACTIVE market view
+    active_df = {
+        "Moneyline": tbl_moneyline,
+        "Spread": tbl_spread,
+        "Total": tbl_total
+    }[market_choice]
+    if not active_df.empty:
+        bankroll_used = float(active_df["Stake ($)"].sum())
+        wk_bankroll = weekly_bankroll if authed else 1000.0
+        util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
+
+        if util_pct < 50:
+            util_color, util_label = "#166534", "Low"
+        elif util_pct < 70:
+            util_color, util_label = "#a16207", "Moderate"
+        else:
+            util_color, util_label = "#b91c1c", "High"
+
+        st.markdown(
+            f"**Total Suggested Stake (this market):** ${bankroll_used:,.2f}  |  **Utilization:** "
+            f"<span style='color:{util_color}'>{util_pct:.1f}%</span> ({util_label}) of weekly bankroll",
+            unsafe_allow_html=True
         )
-    else:
-        # Static, non-sortable preview
-        st.table(show[columns_order])
-
-    # Utilization summary (uses actual bankroll if authed, else preview math)
-    bankroll_used = float(df["Stake ($)"].sum())
-    wk_bankroll = weekly_bankroll if authed else 1000.0
-    util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
-
-    if util_pct < 50:
-        util_color, util_label = "#166534", "Low"
-    elif util_pct < 70:
-        util_color, util_label = "#a16207", "Moderate"
-    else:
-        util_color, util_label = "#b91c1c", "High"
-
-    st.markdown(
-        f"**Total Suggested Stake:** ${bankroll_used:,.2f}  |  **Utilization:** "
-        f"<span style='color:{util_color}'>{util_pct:.1f}%</span> ({util_label}) of weekly bankroll",
-        unsafe_allow_html=True
-    )
 
 # ---- Run app (soft gate; no hard require_auth) ----
 run_app()
