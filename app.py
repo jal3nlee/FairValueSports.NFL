@@ -435,7 +435,7 @@ def run_app():
 
     # Top nudge
     if not authed:
-        st.info("Preview Mode: examples rows shown - **Sign in** to adjust filters and sort.")
+        st.info("Preview Mode: showing today's top pick - **Sign in** to see all picks, filters and sorting.")
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
@@ -608,6 +608,8 @@ def run_app():
 
     # Sort strongest first (static for preview; interactive for authed)
     df = df.sort_values(["EV%","Fair Win %"], ascending=[False, False]).reset_index(drop=True)
+    if not authed:
+        df = df.head(1)
 
     # Pretty display helpers
     def fmt_odds(o):
