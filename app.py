@@ -435,7 +435,7 @@ def run_app():
 
     # Top nudge
     if not authed:
-        st.info("Preview mode: example rows shown. **Sign in** to adjust filters and sort.")
+        st.info('Preview mode: example rows shown. [Sign in](?auth=1) to adjust filters and sort.')
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
