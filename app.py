@@ -75,7 +75,6 @@ st.session_state.setdefault("sb_session", None)
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
 st.session_state.setdefault("show_auth", False)
-st.session_state.setdefault("expand_account", False)  # used to auto-open Account expander
 
 def _store_session(sess):
     st.session_state.sb_session = sess
@@ -126,7 +125,6 @@ def auth_view():
                     _store_session(sess)
                     st.success("Signed in.")
                     st.session_state.show_auth = False
-                    st.session_state.expand_account = False  # close on success
                     st.rerun()
                 else:
                     st.error("Sign-in succeeded but no session was returned. Please try again.")
@@ -186,12 +184,9 @@ with st.sidebar:
         st.info("Free full access in September—create a free account to unlock filters and sorting.")
         if st.button("Sign in / Create account"):
             st.session_state.show_auth = True
-            st.session_state.expand_account = True
-            st.rerun()
 
     if st.session_state.show_auth and not authed:
-        # Auto-expand based on flag
-        with st.expander("Account", expanded=st.session_state.get("expand_account", False)):
+        with st.expander("Account", expanded=True):
             auth_view()
 
 with st.sidebar.expander("How to use", expanded=False):
@@ -438,16 +433,9 @@ def run_app():
 
     st.title("NFL Expected Value Model")
 
-    # Top nudge — button opens sidebar auth expander (no URL, no new tab)
+    # Top nudge
     if not authed:
-        col1, col2 = st.columns([1, 0.22])
-        with col1:
-            st.info("Preview mode: example rows shown. Sign in to adjust filters and sort.")
-        with col2:
-            if st.button("Sign in", use_container_width=True):
-                st.session_state.show_auth = True
-                st.session_state.expand_account = True
-                st.rerun()
+        st.info("Preview mode: example rows shown. **Sign in** to adjust filters and sort.")
 
     # --- Window dropdown (disabled when not signed in) ---
     now_utc = datetime.now(timezone.utc)
@@ -465,6 +453,7 @@ def run_app():
     )
 
     # Determine time window + sport key(s)
+    # (Window math still uses PACIFIC per your original logic; label stays “Next 7 Days”)
     def _short_md(dt_utc):
         local = dt_utc.astimezone(EASTERN)
         return f"{local.month}/{local.day}"
@@ -649,15 +638,17 @@ def run_app():
     columns_order = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
 
     if authed:
+        # Interactive view
         st.dataframe(
             show[columns_order],
             use_container_width=True,
             hide_index=True,
         )
     else:
+        # Static, non-sortable preview
         st.table(show[columns_order])
 
-    # Utilization summary
+    # Utilization summary (uses actual bankroll if authed, else preview math)
     bankroll_used = float(df["Stake ($)"].sum())
     wk_bankroll = weekly_bankroll if authed else 1000.0
     util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
