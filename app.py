@@ -324,11 +324,13 @@ def nfl_week_window_utc(week_index: int, now_utc: datetime):
     """Thu 00:00 ET → Tue 23:59:59 ET window, returned in UTC."""
     yr = now_utc.astimezone(EASTERN).year
     wk1 = thursday_after_labor_day_utc(yr)
+    if now_utc < wk1:
+        return 0
     if week_index == 0:
         start = datetime(yr, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end   = wk1 - timedelta(seconds=1)
         return start, end
-    start = wk1 + timedelta(days=7 * (week_index - 1))
+    start = thursday_after_labor_day_utc(yr) + timedelta(days=7 * (week_index - 1))
     end   = start + timedelta(days=5, hours=23, minutes=59, seconds=59)
     return start, end
 
@@ -453,7 +455,6 @@ def run_app():
     )
 
     # Determine time window + sport key(s)
-    # (Window math still uses PACIFIC per your original logic; label stays “Next 7 Days”)
     def _short_md(dt_utc):
         local = dt_utc.astimezone(EASTERN)
         return f"{local.month}/{local.day}"
@@ -515,10 +516,19 @@ def run_app():
             key="min_ev",
         )
 
+    # NEW: Fair Win % threshold (for authed users)
+    fair_win_min = st.slider(
+        "Minimum Fair Win %",
+        min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+        help="Hide picks with a fair (no-vig) win probability below this percentage.",
+        disabled=not authed,
+        key="min_fair_win_pct",
+    )
+
     show_all = st.checkbox(
-        "Show all games (ignore EV% filter)",
+        "Show all games (ignore EV% & Fair Win % filters)",
         value=False,
-        help="Display every matchup regardless of EV%.",
+        help="Display every matchup regardless of EV% and Fair Win % thresholds.",
         disabled=not authed,
         key="show_all",
     )
@@ -576,7 +586,7 @@ def run_app():
             rows.append({
                 "Game": game_label, "Pick": r["home_team"],
                 "Best Odds": price, "Best Book": r.get("home_book"),
-                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,  # store as raw; format later
+                "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                 "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
                 "Date": date_str
             })
@@ -599,11 +609,12 @@ def run_app():
         st.info("No sides available.")
         st.stop()
 
-    # Apply EV filter only when authed
+    # Apply Fair Win % + EV% filters only when authed (and not 'show all')
     if authed and not show_all:
+        df = df[df["Fair Win %"] >= (float(fair_win_min) / 100.0)]
         df = df[df["EV%"] >= float(min_ev)].reset_index(drop=True)
         if df.empty:
-            st.info("No games meet the EV% filter for this window.")
+            st.info("No games meet the current Fair Win % and EV% filters for this window.")
             st.stop()
 
     # Sort strongest first (static for preview; interactive for authed)
