@@ -771,7 +771,7 @@ def run_app():
                 rows.append({
                     "Market": "Moneyline",
                     "Game": game_label, "Pick": r["home_team"],
-                    "Descriptor": "",  # no line for moneyline
+                    "Line": "",  # not applicable on moneyline; hidden via column set below
                     "Best Odds": price, "Best Book": r.get("home_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
@@ -785,7 +785,7 @@ def run_app():
                 rows.append({
                     "Market": "Moneyline",
                     "Game": game_label, "Pick": r["away_team"],
-                    "Descriptor": "",
+                    "Line": "",
                     "Best Odds": price, "Best Book": r.get("away_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
@@ -799,31 +799,29 @@ def run_app():
             date_str = fmt_date_et_str(r.get("commence_time"))
             game_label = f"{r['home_team']} vs {r['away_team']}"
             line = float(r.get("line"))
-            # Home - line applies to home side (e.g., HOME -3.5)
+            # Home side (line is shown by itself, no team name)
             if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
                 fair_p, price = float(r["home_fair"]), int(r["home_price"])
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
-                desc = f"{r['home_team']} {line:+g}"
                 rows.append({
                     "Market": "Spread",
                     "Game": game_label, "Pick": r["home_team"],
-                    "Descriptor": desc,
+                    "Line": f"{line:+g}",  # e.g., -3.5, +0
                     "Best Odds": price, "Best Book": r.get("home_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
                     "Date": date_str
                 })
-            # Away - inverse line
+            # Away side (inverse sign)
             if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
                 fair_p, price = float(r["away_fair"]), int(r["away_price"])
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
-                desc = f"{r['away_team']} {(-line):+g}"
                 rows.append({
                     "Market": "Spread",
                     "Game": game_label, "Pick": r["away_team"],
-                    "Descriptor": desc,
+                    "Line": f"{(-line):+g}",
                     "Best Odds": price, "Best Book": r.get("away_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
@@ -842,11 +840,10 @@ def run_app():
                 fair_p, price = float(r["over_fair"]), int(r["over_price"])
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
-                desc = f"Over {total:g}"
                 rows.append({
                     "Market": "Total",
                     "Game": game_label, "Pick": "Over",
-                    "Descriptor": desc,
+                    "Line": f"{total:g}",
                     "Best Odds": price, "Best Book": r.get("over_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
@@ -857,11 +854,10 @@ def run_app():
                 fair_p, price = float(r["under_fair"]), int(r["under_price"])
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
-                desc = f"Under {total:g}"
                 rows.append({
                     "Market": "Total",
                     "Game": game_label, "Pick": "Under",
-                    "Descriptor": desc,
+                    "Line": f"{total:g}",
                     "Best Odds": price, "Best Book": r.get("under_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
@@ -886,6 +882,11 @@ def run_app():
         if not authed:
             out = out.head(1)
         # Pretty formatting
+        def _fmt_line(x):
+            # Keep +0 / -0 as requested; blank stays blank for moneyline
+            return x
+        if "Line" in out.columns:
+            out["Line"] = out["Line"].map(_fmt_line)
         out["Best Odds"] = out["Best Odds"].map(fmt_odds)
         out["Best Book"] = out["Best Book"].astype(str)
         out["Fair Win %"] = out["Fair Win %"].map(lambda x: f"{x*100:.1f}%")
@@ -893,7 +894,9 @@ def run_app():
         out["Kelly (u)"] = out["Kelly (u)"].map(lambda x: f"{x:.2f}u")
         return out
 
-    columns_order = ["Game","Pick","Descriptor","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+    # Column sets per market
+    cols_moneyline = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+    cols_with_line = ["Game","Pick","Line","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
 
     st.subheader("Games & EV")
 
@@ -903,9 +906,9 @@ def run_app():
             st.info("No moneyline opportunities meet the current filters.")
         else:
             if authed:
-                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+                st.dataframe(to_show[cols_moneyline], use_container_width=True, hide_index=True)
             else:
-                st.table(to_show[columns_order])
+                st.table(to_show[cols_moneyline])
 
     elif market_choice == "Spread":
         to_show = apply_filters(tbl_spread)
@@ -913,9 +916,9 @@ def run_app():
             st.info("No spread opportunities meet the current filters.")
         else:
             if authed:
-                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+                st.dataframe(to_show[cols_with_line], use_container_width=True, hide_index=True)
             else:
-                st.table(to_show[columns_order])
+                st.table(to_show[cols_with_line])
 
     else:  # Total
         to_show = apply_filters(tbl_total)
@@ -923,9 +926,9 @@ def run_app():
             st.info("No total opportunities meet the current filters.")
         else:
             if authed:
-                st.dataframe(to_show[columns_order], use_container_width=True, hide_index=True)
+                st.dataframe(to_show[cols_with_line], use_container_width=True, hide_index=True)
             else:
-                st.table(to_show[columns_order])
+                st.table(to_show[cols_with_line])
 
     # Utilization summary based on the ACTIVE market view
     active_df = {
