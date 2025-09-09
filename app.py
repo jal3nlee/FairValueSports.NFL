@@ -683,37 +683,37 @@ def run_app():
     df_spread_books = build_market_from_lines_spread(df_spread_lines)
     df_total_books  = build_market_from_lines_total(df_total_lines)
 
-    # --- Sportsbook filter (sidebar) ---
-def _books_from(df: pd.DataFrame) -> set[str]:
-    if df is None or df.empty or "book" not in df.columns:
-        return set()
-    return set(df["book"].dropna().astype(str).unique().tolist())
-
-all_books = sorted(_books_from(df_ml_books) | _books_from(df_spread_books) | _books_from(df_total_books))
-
-# Only show the control if we actually have books to pick from
-if all_books:
-    selected_books = st.sidebar.multiselect(
-        "Include Sportsbooks",
-        options=all_books,
-        default=all_books,  # start with everything included
-        help="Uncheck sportsbooks you don’t want to include in screening."
-    )
-else:
-    selected_books = []
-
-def _apply_book_filter(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-    if not selected_books:
-        # If user deselects everything, treat as "no books" → empty frame
-        return df.iloc[0:0].copy()
-    return df[df["book"].isin(selected_books)].copy()
-
-# Apply the filter BEFORE computing consensus/best prices
-df_ml_books     = _apply_book_filter(df_ml_books)
-df_spread_books = _apply_book_filter(df_spread_books)
-df_total_books  = _apply_book_filter(df_total_books)
+        # --- Sportsbook filter (sidebar) ---
+    def _books_from(df: pd.DataFrame) -> set[str]:
+        if df is None or df.empty or "book" not in df.columns:
+            return set()
+        return set(df["book"].dropna().astype(str).unique().tolist())
+    
+    all_books = sorted(_books_from(df_ml_books) | _books_from(df_spread_books) | _books_from(df_total_books))
+    
+    # Only show the control if we actually have books to pick from
+    if all_books:
+        selected_books = st.sidebar.multiselect(
+            "Include Sportsbooks",
+            options=all_books,
+            default=all_books,  # start with everything included
+            help="Uncheck sportsbooks you don’t want to include in screening."
+        )
+    else:
+        selected_books = []
+    
+    def _apply_book_filter(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return df
+        if not selected_books:
+            # If user deselects everything, treat as "no books" → empty frame
+            return df.iloc[0:0].copy()
+        return df[df["book"].isin(selected_books)].copy()
+    
+    # Apply the filter BEFORE computing consensus/best prices
+    df_ml_books     = _apply_book_filter(df_ml_books)
+    df_spread_books = _apply_book_filter(df_spread_books)
+    df_total_books  = _apply_book_filter(df_total_books)
 
 
     # De-vig consensus and best price selection
