@@ -566,7 +566,7 @@ def run_app():
 
     window_options = ["Today", week_label, "Next 7 Days"]
     window_choice = st.selectbox(
-        "Window",
+        "Date Window",
         window_options,
         index=1,
         key="window_choice",
@@ -650,13 +650,13 @@ def run_app():
         selected_books = []
 
     # --- Inputs (two matched rows) ---
-    st.subheader("Inputs")
+    st.subheader("Filters & Bankroll")
     
     # Row 1: EV & Fair Win filters (two equal columns)
     r1c1, r1c2 = st.columns([1, 1])
     with r1c1:
         min_ev = st.slider(
-            "Minimum EV%",
+            "Minimum Expected Value (%)",
             min_value=0.0, max_value=20.0, value=0.0, step=0.1,
             format="%0.1f%%",
             help="Filter out plays below this expected value.",
@@ -665,7 +665,7 @@ def run_app():
         )
     with r1c2:
         fair_win_min = st.slider(
-            "Minimum Fair Win %",
+            "Minimum Fair Win Probability (%)",
             min_value=0.0, max_value=100.0, value=0.0, step=0.5,
             format="%0.1f%%",
             help="Hide picks with a fair (no-vig) win probability below this percentage.",
@@ -685,10 +685,10 @@ def run_app():
         )
     with r2c2:
         kelly_pct = st.slider(
-            "Kelly %",
+            "Kelly Factor (%)",
             min_value=0.0, max_value=100.0, value=50.0, step=0.5,
             format="%0.1f%%",
-            help="Controls bet size. 50% = half Kelly, 100% = full Kelly.",
+            help="Controls risk factor. 50% = half Kelly, 100% = full Kelly.",
             disabled=not authed,
             key="kelly_factor",  # keep same key; now represents percent
         )
@@ -708,14 +708,12 @@ def run_app():
         )
     with t2:
         show_all = st.toggle(
-            "Show all games",
+            "Show all matchups",
             value=False,
             help="Ignore EV% and Fair Win % filters.",
             disabled=not authed,
             key="show_all",
         )
-
-
 
     # Build book-level tables (from filtered lines)
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
@@ -913,7 +911,7 @@ def run_app():
         latest_pull = max((parse_iso_dt_utc(p) for p in pulled_list if p), default=None)
     else:
         latest_pull = None
-    st.subheader("Games & EV")
+    st.subheader("Screened Picks")
     if latest_pull:
         pulled_at_et = latest_pull.astimezone(EASTERN)
         st.caption(f"Window: {caption_label}  |  Data pulled: {pulled_at_et.strftime('%b %d, %Y %I:%M %p ET')}  |  All times ET. Fair Win % is no-vig.")
