@@ -537,7 +537,7 @@ def best_prices_totals(df_totals: pd.DataFrame):
     ).groupby(["event_id","home_team","away_team","total"]).first().reset_index()[
         ["event_id","home_team","away_team","total","book","under_price"]
     ].rename(columns={"book":"under_book"})
-    return pd.merge(over_best, under_best, on=["event_id","home_team","away_team","total"], how="outer"])
+    return pd.merge(over_best, under_best, on=["event_id","home_team","away_team","total"], how="outer")
 
 # =======================
 # Main app (soft-gated)
