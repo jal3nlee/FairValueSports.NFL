@@ -649,67 +649,67 @@ def run_app():
     else:
         selected_books = []
 
-# --- Inputs (two matched rows) ---
-st.subheader("Inputs")
-
-# Row 1: EV & Fair Win filters (two equal columns)
-r1c1, r1c2 = st.columns([1, 1])
-with r1c1:
-    min_ev = st.slider(
-        "Minimum EV%",
-        min_value=0.0, max_value=20.0, value=0.0, step=0.1,
-        format="%0.1f%%",
-        help="Filter out plays below this expected value.",
+    # --- Inputs (two matched rows) ---
+    st.subheader("Inputs")
+    
+    # Row 1: EV & Fair Win filters (two equal columns)
+    r1c1, r1c2 = st.columns([1, 1])
+    with r1c1:
+        min_ev = st.slider(
+            "Minimum EV%",
+            min_value=0.0, max_value=20.0, value=0.0, step=0.1,
+            format="%0.1f%%",
+            help="Filter out plays below this expected value.",
+            disabled=not authed,
+            key="min_ev",
+        )
+    with r1c2:
+        fair_win_min = st.slider(
+            "Minimum Fair Win %",
+            min_value=0.0, max_value=100.0, value=0.0, step=0.5,
+            format="%0.1f%%",
+            help="Hide picks with a fair (no-vig) win probability below this percentage.",
+            disabled=not authed,
+            key="min_fair_win_pct",
+        )
+    
+    # Row 2: Bankroll & Kelly (two equal columns to match Row 1)
+    r2c1, r2c2 = st.columns([1, 1])
+    with r2c1:
+        weekly_bankroll = st.number_input(
+            "Weekly Bankroll ($)",
+            min_value=0.0, value=1000.0, step=50.0,
+            help="Total budget for this week.",
+            disabled=not authed,
+            key="weekly_bankroll",
+        )
+    with r2c2:
+        kelly_pct = st.slider(
+            "Kelly %",
+            min_value=0.0, max_value=100.0, value=50.0, step=0.5,
+            format="%0.1f%%",
+            help="Controls bet size. 50% = half Kelly, 100% = full Kelly.",
+            disabled=not authed,
+            key="kelly_factor",  # keep same key; now represents percent
+        )
+        use_kelly = st.checkbox(
+            "Use Kelly sizing",
+            value=True,
+            help="If off, hides stake sizing and utilization.",
+            disabled=not authed,
+            key="use_kelly",
+        )
+    
+    # Convert Kelly % (UI) → fraction for calculations below
+    kelly_factor = (kelly_pct / 100.0)
+    
+    show_all = st.checkbox(
+        "Show all games (ignore EV% & Fair Win % filters)",
+        value=False,
+        help="Display every matchup regardless of EV% and Fair Win % thresholds.",
         disabled=not authed,
-        key="min_ev",
+        key="show_all",
     )
-with r1c2:
-    fair_win_min = st.slider(
-        "Minimum Fair Win %",
-        min_value=0.0, max_value=100.0, value=0.0, step=0.5,
-        format="%0.1f%%",
-        help="Hide picks with a fair (no-vig) win probability below this percentage.",
-        disabled=not authed,
-        key="min_fair_win_pct",
-    )
-
-# Row 2: Bankroll & Kelly (two equal columns to match Row 1)
-r2c1, r2c2 = st.columns([1, 1])
-with r2c1:
-    weekly_bankroll = st.number_input(
-        "Weekly Bankroll ($)",
-        min_value=0.0, value=1000.0, step=50.0,
-        help="Total budget for this week.",
-        disabled=not authed,
-        key="weekly_bankroll",
-    )
-with r2c2:
-    kelly_pct = st.slider(
-        "Kelly %",
-        min_value=0.0, max_value=100.0, value=50.0, step=0.5,
-        format="%0.1f%%",
-        help="Controls bet size. 50% = half Kelly, 100% = full Kelly.",
-        disabled=not authed,
-        key="kelly_factor",  # keep same key; now represents percent
-    )
-    use_kelly = st.checkbox(
-        "Use Kelly sizing",
-        value=True,
-        help="If off, hides stake sizing and utilization.",
-        disabled=not authed,
-        key="use_kelly",
-    )
-
-# Convert Kelly % (UI) → fraction for calculations below
-kelly_factor = (kelly_pct / 100.0)
-
-show_all = st.checkbox(
-    "Show all games (ignore EV% & Fair Win % filters)",
-    value=False,
-    help="Display every matchup regardless of EV% and Fair Win % thresholds.",
-    disabled=not authed,
-    key="show_all",
-)
 
     # Build book-level tables (from filtered lines)
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
