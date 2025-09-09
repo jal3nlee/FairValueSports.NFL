@@ -692,25 +692,29 @@ def run_app():
             disabled=not authed,
             key="kelly_factor",  # keep same key; now represents percent
         )
-        # 1) Kelly sizing switch (inside r2c2)
-        use_kelly = st.toggle(
-            "Use Kelly sizing",
-            value=True,
-            help="If off, hides stake sizing and utilization.",
-            disabled=not authed,
-            key="use_kelly",
-        )
     
     # Convert Kelly % (UI) → fraction for calculations below
     kelly_factor = (kelly_pct / 100.0)
     
-    show_all = st.toggle(
-        "Show all games (ignore EV% & Fair Win % filters)",
-        value=False,
-        help="Display every matchup regardless of EV% and Fair Win % thresholds.",
-        disabled=not authed,
-        key="show_all",
-    )
+    # Row 3: Toggles (same line)
+    t1, t2 = st.columns([1, 1])
+    with t1:
+        use_kelly = st.toggle(
+            "Kelly Sizing",
+            value=True,
+            help="Turn on to compute Kelly units and $ stakes; turn off to hide sizing and utilization.",
+            disabled=not authed,
+            key="use_kelly",
+        )
+    with t2:
+        show_all = st.toggle(
+            "Show all games",
+            value=False,
+            help="Show every matchup regardless of EV% and Fair Win % filters.",
+            disabled=not authed,
+            key="show_all",
+        )
+
 
     # Build book-level tables (from filtered lines)
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
