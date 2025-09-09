@@ -431,7 +431,7 @@ def build_market_from_lines_spread(df_lines: pd.DataFrame) -> pd.DataFrame:
     )
     return agg
 
-def build_market_from_lines_total(df_lines: pd.DataFrame) -> pd.DataFrame:
+def build_market_from_lines_total(df_lines: pd.DataFrame) -> pdDataFrame:
     if df_lines.empty: return pd.DataFrame()
     df = df_lines[(df_lines["market"]=="total") & (df_lines["side"].isin(["over","under"]))].copy()
     df["over_price"]  = df.apply(lambda r: r["price"] if r["side"]=="over"  else None, axis=1)
@@ -537,7 +537,7 @@ def best_prices_totals(df_totals: pd.DataFrame):
     ).groupby(["event_id","home_team","away_team","total"]).first().reset_index()[
         ["event_id","home_team","away_team","total","book","under_price"]
     ].rename(columns={"book":"under_book"})
-    return pd.merge(over_best, under_best, on=["event_id","home_team","away_team","total"], how="outer")
+    return pd.merge(over_best, under_best, on=["event_id","home_team","away_team","total"], how="outer"])
 
 # =======================
 # Main app (soft-gated)
@@ -608,7 +608,48 @@ def run_app():
         sport_keys   = {sport_key_for_week(week_index)}
         caption_label = f"{week_label} — {_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
-    # --- Inputs (disabled until signed in) ---
+    # =======================
+    # Fetch normalized lines from Supabase (all three markets) — (moved up)
+    # =======================
+    df_ml_lines,   pulled_ml  = fetch_market_lines(sport_keys, "moneyline")
+    df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
+    df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
+
+    # Filter by chosen window at the line level
+    def filter_by_window_df(df_any: pd.DataFrame) -> pd.DataFrame:
+        if df_any.empty: return df_any
+        df = df_any.copy()
+        df["__t0"] = df["commence_time"].apply(parse_iso_dt_utc)
+        df = df[(df["__t0"] >= window_start) & (df["__t0"] <= window_end)]
+        return df.drop(columns=["__t0"])
+
+    df_ml_lines     = filter_by_window_df(df_ml_lines)
+    df_spread_lines = filter_by_window_df(df_spread_lines)
+    df_total_lines  = filter_by_window_df(df_total_lines)
+
+    if df_ml_lines.empty and df_spread_lines.empty and df_total_lines.empty:
+        st.info(f"No NFL games in the selected window ({caption_label}).")
+        st.stop()
+
+    # --- Sportsbook filter (below Window) ---
+    def _books_from(df: pd.DataFrame) -> set[str]:
+        if df is None or df.empty or "book" not in df.columns:
+            return set()
+        return set(df["book"].dropna().astype(str).unique().tolist())
+
+    all_books = sorted(_books_from(df_ml_lines) | _books_from(df_spread_lines) | _books_from(df_total_lines))
+
+    if all_books:
+        selected_books = st.multiselect(
+            "Sportsbooks",
+            options=all_books,
+            default=all_books,
+            help="Uncheck sportsbooks you don’t want to include in screening."
+        )
+    else:
+        selected_books = []
+
+    # --- Inputs (after sportsbook picker) ---
     st.subheader("Inputs")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -652,69 +693,22 @@ def run_app():
         key="show_all",
     )
 
-    # =======================
-    # Fetch normalized lines from Supabase (all three markets)
-    # =======================
-    # Moneyline
-    df_ml_lines, pulled_ml = fetch_market_lines(sport_keys, "moneyline")
-    # Spread
-    df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
-    # Total
-    df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
-
-    # Filter by chosen window at the line level
-    def filter_by_window_df(df_any: pd.DataFrame) -> pd.DataFrame:
-        if df_any.empty: return df_any
-        df = df_any.copy()
-        df["__t0"] = df["commence_time"].apply(parse_iso_dt_utc)
-        df = df[(df["__t0"] >= window_start) & (df["__t0"] <= window_end)]
-        return df.drop(columns=["__t0"])
-
-    df_ml_lines     = filter_by_window_df(df_ml_lines)
-    df_spread_lines = filter_by_window_df(df_spread_lines)
-    df_total_lines  = filter_by_window_df(df_total_lines)
-
-    if df_ml_lines.empty and df_spread_lines.empty and df_total_lines.empty:
-        st.info(f"No NFL games in the selected window ({caption_label}).")
-        st.stop()
-
-    # Build book-level tables
+    # Build book-level tables (from filtered lines)
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
     df_spread_books = build_market_from_lines_spread(df_spread_lines)
     df_total_books  = build_market_from_lines_total(df_total_lines)
 
-        # --- Sportsbook filter (sidebar) ---
-    def _books_from(df: pd.DataFrame) -> set[str]:
-        if df is None or df.empty or "book" not in df.columns:
-            return set()
-        return set(df["book"].dropna().astype(str).unique().tolist())
-    
-    all_books = sorted(_books_from(df_ml_books) | _books_from(df_spread_books) | _books_from(df_total_books))
-    
-    # Only show the control if we actually have books to pick from
-    if all_books:
-        selected_books = st.sidebar.multiselect(
-            "Include Sportsbooks",
-            options=all_books,
-            default=all_books,  # start with everything included
-            help="Uncheck sportsbooks you don’t want to include in screening."
-        )
-    else:
-        selected_books = []
-    
+    # Apply sportsbook selection BEFORE consensus/best prices
     def _apply_book_filter(df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
             return df
         if not selected_books:
-            # If user deselects everything, treat as "no books" → empty frame
             return df.iloc[0:0].copy()
         return df[df["book"].isin(selected_books)].copy()
-    
-    # Apply the filter BEFORE computing consensus/best prices
+
     df_ml_books     = _apply_book_filter(df_ml_books)
     df_spread_books = _apply_book_filter(df_spread_books)
     df_total_books  = _apply_book_filter(df_total_books)
-
 
     # De-vig consensus and best price selection
     df_ml_cons   = compute_consensus_fair_probs_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
