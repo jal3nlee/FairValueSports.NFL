@@ -695,9 +695,9 @@ def run_app():
     
     # Convert Kelly % (UI) → fraction for calculations below
     kelly_factor = (kelly_pct / 100.0)
-    
-       # Row 3: Toggles — tighter spacing
-    t1, spacer, t2 = st.columns([1, 0.05, 1], gap="small")
+        
+      # Row 3: Toggles — left-packed, closer together (no CSS)
+    t1, spacer, t2, filler = st.columns([0.25, 0.03, 0.25, 0.47], gap="small")
     with t1:
         use_kelly = st.toggle(
             "Kelly Sizing",
@@ -714,6 +714,8 @@ def run_app():
             disabled=not authed,
             key="show_all",
         )
+    # 'filler' is intentionally empty to keep both toggles near each other
+
 
     # Build book-level tables (from filtered lines)
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
