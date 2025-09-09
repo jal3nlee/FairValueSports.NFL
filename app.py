@@ -583,20 +583,20 @@ def run_app():
         local = dt_utc.astimezone(EASTERN)
         return f"{local.strftime('%a')} {local.month}/{local.day}"
 
-    def window_next_7_days(now_utc, tz=PACIFIC):
+    def window_next_7_days(now_utc, tz=EASTERN):
         local = now_utc.astimezone(tz)
         start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
         end_local = (start_local + timedelta(days=8)).replace(hour=23, minute=59, second=59, microsecond=0)
         return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
     if window_choice == "Today":
-        now_local = datetime.now(PACIFIC)
+        now_local = datetime.now(EASTERN)
         window_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         window_end   = (window_start + timedelta(days=1)) - timedelta(seconds=1)
         sport_keys   = {sport_key_for_week(current_week)}
         caption_label = f"Today ({_short_md(window_start)})"
     elif window_choice == "Next 7 Days":
-        window_start, window_end = window_next_7_days(now_utc, tz=PACIFIC)
+        window_start, window_end = window_next_7_days(now_utc, tz=EASTERN)
         sport_keys = {
             sport_key_for_week(infer_current_week_index(window_start)),
             sport_key_for_week(infer_current_week_index(window_end)),
