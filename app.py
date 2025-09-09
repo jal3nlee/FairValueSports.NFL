@@ -609,7 +609,7 @@ def run_app():
         caption_label = f"{week_label} — {_short_day_md(window_start)} – {_short_day_md(window_end)}"
 
     # =======================
-    # Fetch normalized lines from Supabase (all three markets) — (moved up)
+    # Fetch normalized lines from Supabase (all three markets)
     # =======================
     df_ml_lines,   pulled_ml  = fetch_market_lines(sport_keys, "moneyline")
     df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
@@ -631,7 +631,7 @@ def run_app():
         st.info(f"No NFL games in the selected window ({caption_label}).")
         st.stop()
 
-    # --- Sportsbook filter (below Window) ---
+    # --- Sportsbook filter (right below Window) ---
     def _books_from(df: pd.DataFrame) -> set[str]:
         if df is None or df.empty or "book" not in df.columns:
             return set()
@@ -649,26 +649,12 @@ def run_app():
     else:
         selected_books = []
 
-    # --- Inputs (after sportsbook picker) ---
+    # --- Inputs (EV/Fair first row; Bankroll/Kelly second row) ---
     st.subheader("Inputs")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        weekly_bankroll = st.number_input(
-            "Weekly Bankroll ($)",
-            min_value=0.0, value=1000.0, step=50.0,
-            help="Total budget for this week.",
-            disabled=not authed,
-            key="weekly_bankroll",
-        )
-    with c2:
-        kelly_factor = st.slider(
-            "Kelly Factor (0.0–1.0)",
-            min_value=0.0, max_value=1.0, value=0.5, step=0.05,
-            help="Controls bet size. Lower = safer; higher = riskier.",
-            disabled=not authed,
-            key="kelly_factor",
-        )
-    with c3:
+
+    # Row 1: EV filters
+    r1c1, r1c2 = st.columns(2)
+    with r1c1:
         min_ev = st.number_input(
             "Minimum EV% to display",
             value=0.0, step=0.5,
@@ -676,14 +662,41 @@ def run_app():
             disabled=not authed,
             key="min_ev",
         )
+    with r1c2:
+        fair_win_min = st.slider(
+            "Minimum Fair Win %",
+            min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+            help="Hide picks with a fair (no-vig) win probability below this percentage.",
+            disabled=not authed,
+            key="min_fair_win_pct",
+        )
 
-    fair_win_min = st.slider(
-        "Minimum Fair Win %",
-        min_value=0.0, max_value=100.0, value=0.0, step=1.0,
-        help="Hide picks with a fair (no-vig) win probability below this percentage.",
-        disabled=not authed,
-        key="min_fair_win_pct",
-    )
+    # Row 2: Bankroll + Kelly
+    r2c1, r2c2, r2c3 = st.columns(3)
+    with r2c1:
+        weekly_bankroll = st.number_input(
+            "Weekly Bankroll ($)",
+            min_value=0.0, value=1000.0, step=50.0,
+            help="Total budget for this week.",
+            disabled=not authed,
+            key="weekly_bankroll",
+        )
+    with r2c2:
+        kelly_factor = st.slider(
+            "Kelly Factor (0.0–1.0)",
+            min_value=0.0, max_value=1.0, value=0.5, step=0.05,
+            help="Controls bet size. Lower = safer; higher = riskier.",
+            disabled=not authed,
+            key="kelly_factor",
+        )
+    with r2c3:
+        use_kelly = st.checkbox(
+            "Use Kelly sizing",
+            value=True,
+            help="If off, hides stake sizing and utilization.",
+            disabled=not authed,
+            key="use_kelly",
+        )
 
     show_all = st.checkbox(
         "Show all games (ignore EV% & Fair Win % filters)",
@@ -872,9 +885,13 @@ def run_app():
         out["Kelly (u)"] = out["Kelly (u)"].map(lambda x: f"{x:.2f}u")
         return out
 
-    # Column sets per market
-    cols_moneyline = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
-    cols_with_line = ["Game","Pick","Line","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+    # Column sets per market (conditional on Kelly toggle)
+    if st.session_state.get("use_kelly", True):
+        cols_moneyline = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+        cols_with_line = ["Game","Pick","Line","Best Odds","Best Book","Fair Win %","EV%","Kelly (u)","Stake ($)","Date"]
+    else:
+        cols_moneyline = ["Game","Pick","Best Odds","Best Book","Fair Win %","EV%","Date"]
+        cols_with_line = ["Game","Pick","Line","Best Odds","Best Book","Fair Win %","EV%","Date"]
 
     # Pull time caption: use the most recent pulled_at across the three markets we touched
     pulled_list = []
@@ -923,29 +940,30 @@ def run_app():
             else:
                 st.table(to_show[cols_with_line])
 
-    # Utilization summary based on the ACTIVE market view
-    active_df = {
-        "Moneyline": tbl_moneyline,
-        "Spread": tbl_spread,
-        "Total": tbl_total
-    }[market_choice]
-    if not active_df.empty:
-        bankroll_used = float(active_df["Stake ($)"].sum())
-        wk_bankroll = weekly_bankroll if authed else 1000.0
-        util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
+    # Utilization summary only if Kelly sizing is ON
+    if st.session_state.get("use_kelly", True):
+        active_df = {
+            "Moneyline": tbl_moneyline,
+            "Spread": tbl_spread,
+            "Total": tbl_total
+        }[market_choice]
+        if not active_df.empty:
+            bankroll_used = float(active_df["Stake ($)"].sum())
+            wk_bankroll = weekly_bankroll if authed else 1000.0
+            util_pct = 100.0 * (bankroll_used / wk_bankroll) if wk_bankroll > 0 else 0.0
 
-        if util_pct < 50:
-            util_color, util_label = "#166534", "Low"
-        elif util_pct < 70:
-            util_color, util_label = "#a16207", "Moderate"
-        else:
-            util_color, util_label = "#b91c1c", "High"
+            if util_pct < 50:
+                util_color, util_label = "#166534", "Low"
+            elif util_pct < 70:
+                util_color, util_label = "#a16207", "Moderate"
+            else:
+                util_color, util_label = "#b91c1c", "High"
 
-        st.markdown(
-            f"**Total Suggested Stake (this market):** ${bankroll_used:,.2f}  |  **Utilization:** "
-            f"<span style='color:{util_color}'>{util_pct:.1f}%</span> ({util_label}) of weekly bankroll",
-            unsafe_allow_html=True
-        )
+            st.markdown(
+                f"**Total Suggested Stake (this market):** ${bankroll_used:,.2f}  |  **Utilization:** "
+                f"<span style='color:{util_color}'>{util_pct:.1f}%</span> ({util_label}) of weekly bankroll",
+                unsafe_allow_html=True
+            )
 
 # ---- Run app (soft gate; no hard require_auth) ----
 run_app()
