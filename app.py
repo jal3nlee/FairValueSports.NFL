@@ -692,7 +692,8 @@ def run_app():
             disabled=not authed,
             key="kelly_factor",  # keep same key; now represents percent
         )
-        use_kelly = st.checkbox(
+        # 1) Kelly sizing switch (inside r2c2)
+        use_kelly = st.toggle(
             "Use Kelly sizing",
             value=True,
             help="If off, hides stake sizing and utilization.",
@@ -703,7 +704,7 @@ def run_app():
     # Convert Kelly % (UI) → fraction for calculations below
     kelly_factor = (kelly_pct / 100.0)
     
-    show_all = st.checkbox(
+    show_all = st.toggle(
         "Show all games (ignore EV% & Fair Win % filters)",
         value=False,
         help="Display every matchup regardless of EV% and Fair Win % thresholds.",
