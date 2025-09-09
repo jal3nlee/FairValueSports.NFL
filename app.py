@@ -431,7 +431,7 @@ def build_market_from_lines_spread(df_lines: pd.DataFrame) -> pd.DataFrame:
     )
     return agg
 
-def build_market_from_lines_total(df_lines: pd.DataFrame) -> pdDataFrame:
+def build_market_from_lines_total(df_lines: pd.DataFrame) -> pd.DataFrame:
     if df_lines.empty: return pd.DataFrame()
     df = df_lines[(df_lines["market"]=="total") & (df_lines["side"].isin(["over","under"]))].copy()
     df["over_price"]  = df.apply(lambda r: r["price"] if r["side"]=="over"  else None, axis=1)
