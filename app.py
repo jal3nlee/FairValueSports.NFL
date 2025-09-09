@@ -696,13 +696,13 @@ def run_app():
     # Convert Kelly % (UI) → fraction for calculations below
     kelly_factor = (kelly_pct / 100.0)
     
-    # Row 3: Toggles (same line)
-    t1, t2 = st.columns([1, 1])
+       # Row 3: Toggles — tighter spacing
+    t1, spacer, t2 = st.columns([1, 0.05, 1], gap="small")
     with t1:
         use_kelly = st.toggle(
             "Kelly Sizing",
             value=True,
-            help="Turn on to compute Kelly units and $ stakes; turn off to hide sizing and utilization.",
+            help="Show Kelly units and $ stakes.",
             disabled=not authed,
             key="use_kelly",
         )
@@ -710,10 +710,11 @@ def run_app():
         show_all = st.toggle(
             "Show all games",
             value=False,
-            help="Show every matchup regardless of EV% and Fair Win % filters.",
+            help="Ignore EV% and Fair Win % filters.",
             disabled=not authed,
             key="show_all",
         )
+
 
 
     # Build book-level tables (from filtered lines)
