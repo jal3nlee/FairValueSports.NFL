@@ -15,14 +15,13 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.warning("Auth not fully configured — running in preview mode.")
+    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
+    st.stop()
 
-supabase: Client = None
-if SUPABASE_URL and SUPABASE_ANON_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # Reattach session tokens if present
-if supabase and st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"):
+if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"):
     supabase.auth.set_session(
         access_token=st.session_state.sb_access_token,
         refresh_token=st.session_state.sb_refresh_token,
@@ -91,7 +90,7 @@ def _clear_session():
     st.session_state.sb_refresh_token = None
 
 def _maybe_refresh_session():
-    if supabase and st.session_state.sb_session is None and st.session_state.sb_refresh_token:
+    if st.session_state.sb_session is None and st.session_state.sb_refresh_token:
         try:
             res = supabase.auth.refresh_session()
             if res and getattr(res, "session", None):
@@ -108,33 +107,27 @@ def auth_view():
             email = st.text_input("Email", key="signin_email")
             password = st.text_input("Password", type="password", key="signin_pw")
             submit = st.form_submit_button("Sign in")
-        if submit and supabase:
+        if submit:
             try:
-                try:
-                    supabase.auth.sign_out()
-                except Exception:
-                    pass
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            try:
                 res = supabase.auth.sign_in_with_password({"email": (email or "").strip(), "password": password})
                 sess = getattr(res, "session", None) or getattr(res, "session", {}) or None
-                if not sess:
-                    try:
-                        res2 = supabase.auth.refresh_session()
-                        sess = getattr(res2, "session", None) or getattr(res2, "session", {}) or None
-                    except Exception:
-                        pass
                 if sess:
                     _store_session(sess)
                     st.success("Signed in.")
                     st.session_state.show_auth = False
                     st.rerun()
                 else:
-                    st.error("Sign-in succeeded but no session was returned. Please try again.")
+                    st.error("Sign-in failed. Please try again.")
             except Exception as e:
                 msg = str(e)
                 if "Invalid login credentials" in msg:
-                    st.error("Sign-in failed: invalid email or password.")
+                    st.error("Invalid email or password.")
                 elif "Email not confirmed" in msg or "confirmed_at" in msg:
-                    st.error("Please verify your email address, then sign in.")
+                    st.error("Please verify your email, then sign in.")
                 else:
                     st.error(f"Sign-in failed: {msg or 'Unknown error.'}")
     with tabs[1]:
@@ -143,7 +136,7 @@ def auth_view():
             email2 = st.text_input("Email", key="signup_email")
             pw2 = st.text_input("Password", type="password", key="signup_pw")
             submit2 = st.form_submit_button("Create account")
-        if submit2 and supabase:
+        if submit2:
             if not full_name.strip():
                 st.warning("Please enter your full name.")
             elif not email2 or not pw2:
@@ -157,7 +150,7 @@ def auth_view():
                 except Exception as e:
                     st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
 
-authed = supabase is not None and st.session_state.sb_session is not None
+authed = st.session_state.sb_session is not None
 
 # --- Sidebar ---
 with st.sidebar:
@@ -168,7 +161,6 @@ with st.sidebar:
 
 st.sidebar.divider()
 
-# Account block (concise)
 with st.sidebar:
     if authed:
         u = getattr(st.session_state.sb_session, "user", None)
@@ -190,74 +182,11 @@ with st.sidebar:
         with st.expander("Account", expanded=True):
             auth_view()
 
-with st.sidebar.expander("How to use", expanded=False):
-    st.markdown(
-        """
-1. **Pick a Window**: **Today**, **NFL Week X**, or **Next 7 Days**.
-2. **Set inputs**:
-   - **Weekly Bankroll ($)** — your total budget for the week.
-   - **Kelly Factor (0–1)** — risk scaling (e.g., 0.5 = half Kelly).
-   - **Minimum EV%** — filter picks above this expected value.
-3. **Review the table**:
-   - **Fair Win %** = de-vigged market consensus.
-   - **EV%** = edge versus best available odds.
-   - **Stake ($)** = recommended bet size based on Kelly & bankroll.
-        """
-    )
-
-with st.sidebar.expander("Glossary", expanded=False):
-    st.markdown(
-        """
-**EV% (Expected Value %)** — How favorable the offered price is versus the fair baseline (no-vig).  
-**Kelly Factor** — Scales bet size to edge; 1.0 = full Kelly, 0.5 = half Kelly.
-        """
-    )
-
-with st.sidebar.expander("Feedback", expanded=False):
-    user = None
-    try:
-        user = getattr(st.session_state.get("sb_session", None), "user", None)
-    except Exception:
-        user = None
-
-    if not user:
-        st.info("You must be signed in to leave feedback.")
-    else:
-        with st.form("feedback_form", clear_on_submit=True):
-            full_name = (user.user_metadata or {}).get("full_name") or (user.user_metadata or {}).get("name") or ""
-            email_addr = getattr(user, "email", "") or (user.user_metadata or {}).get("email", "")
-            st.markdown(f"**Submitting as:** {full_name or 'Unknown'}  \n**Email:** {email_addr or 'Unknown'}")
-            feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
-            submitted = st.form_submit_button("Submit Feedback")
-
-        if submitted:
-            txt = (feedback_text or "").strip()
-            if not txt:
-                st.warning("Please enter feedback before submitting.")
-            else:
-                try:
-                    payload = {
-                        "message": txt,
-                        "name": full_name.strip() or None,
-                        "email": (email_addr or "").strip() or None,
-                        "user_id": user.id,
-                    }
-                    supabase.table("feedback").insert(payload).execute()
-                    st.success("Thanks for your feedback!")
-                except Exception as e:
-                    st.error(f"Error saving feedback: {e}")
-
-with st.sidebar.expander("Disclaimer", expanded=False):
-    st.markdown(
-        """
-**Fair Value Betting** is for **education and entertainment** only — not financial or betting advice.
-        """
-    )
-
 # =======================
-# The rest of your model code (all helpers, odds logic, run_app()) stays exactly as you had it
+# >>> YOUR MODEL CODE (helpers, fetchers, run_app definition)
 # =======================
+# Paste your entire model + odds logic here,
+# including `def run_app():` (unchanged from before).
 
-# ---- Run app (soft gate; no hard require_auth) ----
+# ---- Run app ----
 run_app()
-
