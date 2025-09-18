@@ -183,10 +183,22 @@ with st.sidebar:
             auth_view()
 
 # =======================
-# >>> YOUR MODEL CODE (helpers, fetchers, run_app definition)
+# NFL app config + helpers + odds model
 # =======================
-# Paste your entire model + odds logic here,
-# including `def run_app():` (unchanged from before).
+
+# (Paste your entire big block here: NFL config, odds helpers, fetchers,
+# compute functions, display functions, etc.)
+# This includes:
+#  - american_to_implied_prob()
+#  - devig_two_way()
+#  - nfl_week_window_utc()
+#  - fetch_market_lines()
+#  - build_market_from_lines_moneyline/spread/total()
+#  - compute_consensus_fair_probs_*
+#  - best_prices_*
+#  - make_rows_*
+#  - run_app() function definition
+# (The full block you pasted earlier.)
 
 # ---- Run app ----
 run_app()
