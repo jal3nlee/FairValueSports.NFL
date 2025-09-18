@@ -682,7 +682,8 @@ def run_app():
         )
     kelly_factor = (kelly_pct / 100.0)
 
-    t1, spacer, t2, filler = st.columns([0.25, 0.03, 0.25, 0.47], gap="small")
+      # --- Inputs (Kelly + Show All, tighter gap) ---
+    t1, t2, filler = st.columns([0.25, 0.25, 0.5], gap="small")
     with t1:
         use_kelly = st.toggle(
             "Kelly Sizing",
