@@ -558,7 +558,7 @@ def best_prices_totals(df_totals: pd.DataFrame):
 # Main app
 # =======================
 def run_app():
-    tabs = st.tabs(["NFL Expected Value Model", "Best Odds by Sportsbook"])
+    tabs = st.tabs(["NFL Expected Value Model", "Best Odds by Sportsbook", "Parlay Builder"])
 
     with tabs[0]:
         if not authed:
