@@ -765,7 +765,6 @@ def run_app():
                     "Market": "Moneyline",
                     "Date": date_str,
                     "Game": game_label, "Pick": r["home_team"],
-                    "Line": "",
                     "Best Odds": price, "Best Book": r.get("home_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                     "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
