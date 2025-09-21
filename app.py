@@ -927,7 +927,7 @@ def run_app():
             st.info("No best odds available.")
         else:
             # Build Matchup column
-            df_best_disp["Matchup"] = df_best_disp["home_team"] + " vs " + df_best_disp["away_team"]
+            df_best_disp["Matchup (Home vs. Away)"] = df_best_disp["home_team"] + " vs " + df_best_disp["away_team"]
     
             # Format odds with "+" for positives
             def fmt_odds(o):
@@ -942,7 +942,7 @@ def run_app():
     
             # Keep only needed columns
             df_best_disp = df_best_disp[[
-                "commence_time", "Matchup", "Home Odds", "home_book", "Away Odds", "away_book"
+                "commence_time", "Matchup (Home vs. Away)", "Home Odds", "home_book", "Away Odds", "away_book"
             ]].rename(columns={
                 "commence_time": "Date",
                 "home_book": "Best Home Book",
@@ -959,7 +959,7 @@ def run_app():
                 column_config={
                     "Matchup": st.column_config.TextColumn(
                         "Matchup",
-                        help="Tooltip: First team listed = Home, second team listed = Away",
+                        help="first team listed = Home, second team listed = Away",
                     )
                 }
             )
