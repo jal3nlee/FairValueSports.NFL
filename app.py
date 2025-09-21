@@ -963,6 +963,65 @@ def run_app():
                     )
                 }
             )
+            
+    with tabs[2]:
+        st.subheader("Parlay Builder")
+
+        # User stake
+        stake = st.number_input("Stake ($)", min_value=1.0, value=10.0, step=1.0)
+
+        # Let user select multiple picks from available games
+        all_games = []
+        for df in [df_ml_disp, df_sp_disp, df_tot_disp]:
+            if not df.empty:
+                all_games.extend(df.to_dict("records"))
+
+        if not all_games:
+            st.info("No games available to build a parlay.")
+            return
+
+        picks = st.multiselect(
+            "Select legs for your parlay",
+            options=[f"{g['Market']} | {g['Game']} | {g['Pick']} {g.get('Line','')}" for g in all_games],
+            default=[],
+            help="Choose at least two bets."
+        )
+
+        if len(picks) < 2:
+            st.warning("Add at least 2 legs to calculate a parlay.")
+        else:
+            # Map picks back to odds
+            leg_rows = []
+            dec_odds = []
+            for pick in picks:
+                game = next((g for g in all_games if f"{g['Market']} | {g['Game']} | {g['Pick']} {g.get('Line','')}" == pick), None)
+                if not game:
+                    continue
+                price = int(game["Best Odds"].replace("+",""))
+                book  = game["Best Book"]
+                dec   = american_to_decimal(price)
+                dec_odds.append(dec)
+                leg_rows.append({
+                    "Game": game["Game"],
+                    "Market": game["Market"],
+                    "Pick": f"{game['Pick']} {game.get('Line','')}".strip(),
+                    "Odds": game["Best Odds"],
+                    "Sportsbook": book
+                })
+
+            # Calculate parlay odds
+            combined_dec = 1
+            for o in dec_odds:
+                combined_dec *= o
+            parlay_american = int((combined_dec - 1) * 100) if combined_dec >= 2 else int(-100 / (combined_dec - 1))
+
+            payout = round(stake * combined_dec, 2)
+
+            st.markdown(f"**Parlay Odds:** {parlay_american:+}")
+            st.markdown(f"**Potential Payout:** ${payout:,.2f} (including stake)")
+
+            st.dataframe(pd.DataFrame(leg_rows))
+
 
 if __name__ == "__main__":
     run_app()
