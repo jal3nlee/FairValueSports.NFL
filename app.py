@@ -755,12 +755,12 @@ def run_app():
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
                     "Market": "Moneyline",
+                    "Date": date_str,
                     "Game": game_label, "Pick": r["home_team"],
                     "Line": "",
                     "Best Odds": price, "Best Book": r.get("home_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
             if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
                 fair_p, price = float(r["away_fair"]), int(r["away_price"])
@@ -768,12 +768,12 @@ def run_app():
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
                     "Market": "Moneyline",
+                    "Date": date_str,
                     "Game": game_label, "Pick": r["away_team"],
                     "Line": "",
                     "Best Odds": price, "Best Book": r.get("away_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
         return pd.DataFrame(rows)
 
@@ -789,12 +789,12 @@ def run_app():
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
                     "Market": "Spread",
+                    "Date": date_str,
                     "Game": game_label, "Pick": r["home_team"],
                     "Line": f"{line:+g}",
                     "Best Odds": price, "Best Book": r.get("home_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
             if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
                 fair_p, price = float(r["away_fair"]), int(r["away_price"])
@@ -802,12 +802,12 @@ def run_app():
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
                     "Market": "Spread",
+                    "Date": date_str,
                     "Game": game_label, "Pick": r["away_team"],
                     "Line": f"{-line:+g}",
                     "Best Odds": price, "Best Book": r.get("away_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
         return pd.DataFrame(rows)
 
@@ -822,26 +822,26 @@ def run_app():
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
-                    "Market": "Total",
+                    "Market": "Total",                    
+                    "Date": date_str,
                     "Game": game_label, "Pick": "Over",
                     "Line": f"{total:.1f}",
                     "Best Odds": price, "Best Book": r.get("over_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
             if pd.notna(r.get("under_price")) and pd.notna(r.get("under_fair")):
                 fair_p, price = float(r["under_fair"]), int(r["under_price"])
                 ev_pct = expected_value_pct(fair_p, price)
                 kelly = kelly_fraction(fair_p, price)
                 rows.append({
-                    "Market": "Total",
+                    "Market": "Total",                    
+                    "Date": date_str,
                     "Game": game_label, "Pick": "Under",
                     "Line": f"{total:.1f}",
                     "Best Odds": price, "Best Book": r.get("under_book"),
                     "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2),
-                    "Date": date_str
+                    "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
                 })
         return pd.DataFrame(rows)
 
