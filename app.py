@@ -601,6 +601,13 @@ def run_app():
     # =======================
     # Fetch lines
     # =======================
+
+    market_map = {
+        "moneyline": "h2h",
+        "spread": "spreads",
+        "total": "totals"
+    }
+
     df_ml_lines,   pulled_ml  = fetch_market_lines(sport_keys, "moneyline")
     df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
     df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
