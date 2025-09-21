@@ -385,6 +385,13 @@ def get_lines_for_snapshot(snapshot_id: str):
         start += PAGE_SIZE
     return pd.DataFrame(rows)
 
+# Map app labels → DB values
+MARKET_MAP = {
+    "moneyline": "h2h",
+    "spread": "spreads",
+    "total": "totals",
+}
+
 def fetch_market_lines(sport_keys: set[str], market_label: str):
     """
     sport_keys: {"NFL"} usually
@@ -615,12 +622,7 @@ def run_app():
     # Fetch lines
     # =======================
 
-    market_map = {
-        "moneyline": "h2h",
-        "spread": "spreads",
-        "total": "totals"
-    }
-
+    
     df_ml_lines,   pulled_ml  = fetch_market_lines(sport_keys, "moneyline")
     df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
     df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
