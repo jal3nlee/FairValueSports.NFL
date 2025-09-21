@@ -627,7 +627,16 @@ def run_app():
         df_ml_lines,   pulled_ml  = fetch_market_lines(sport_keys, "moneyline")
         df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
         df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
-    
+
+                # 🔍 Debugging: see how many rows are coming back from Supabase
+        st.write("Moneyline rows pulled:", len(df_ml_lines))
+        st.write("Spread rows pulled:", len(df_spread_lines))
+        st.write("Total rows pulled:", len(df_total_lines))
+        
+        if not df_spread_lines.empty:
+            with st.expander("Raw spread lines (first 20)"):
+                st.dataframe(df_spread_lines.head(20))
+
         # Filter by window
         def filter_by_window_df(df_any: pd.DataFrame) -> pd.DataFrame:
             if df_any.empty: return df_any
