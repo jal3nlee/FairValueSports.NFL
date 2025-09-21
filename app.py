@@ -704,24 +704,13 @@ def run_app():
         )
     kelly_factor = (kelly_pct / 100.0)
 
-      # --- Inputs (Kelly + Show All, tighter gap) ---
-    t1, t2, filler = st.columns([0.25, 0.25, 0.5], gap="small")
-    with t1:
-        use_kelly = st.toggle(
-            "Kelly Sizing",
-            value=True,
-            help="Show Kelly units and $ stakes.",
-            disabled=not authed,
-            key="use_kelly",
-        )
-    with t2:
-        show_all = st.toggle(
-            "Show all matchups",
-            value=False,
-            help="Ignore EV% and Fair Win % filters.",
-            disabled=not authed,
-            key="show_all",
-        )
+    show_all = st.toggle(
+        "Show all matchups",
+        value=False,
+        help="Ignore EV% and Fair Win % filters.",
+        disabled=not authed,
+        key="show_all",
+    )
 
     # Build book-level tables
     df_ml_books     = build_market_from_lines_moneyline(df_ml_lines)
