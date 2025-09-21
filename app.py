@@ -385,20 +385,31 @@ def get_lines_for_snapshot(snapshot_id: str):
         start += PAGE_SIZE
     return pd.DataFrame(rows)
 
-def fetch_market_lines(sport_keys: set[str], market_db: str):
+def fetch_market_lines(sport_keys: set[str], market_label: str):
+    """
+    sport_keys: {"NFL"} usually
+    market_label: one of "moneyline", "spread", "total" (app labels)
+    """
     all_lines = []
     pulled_ats = []
+
+    db_market = MARKET_MAP.get(market_label, market_label)
+
     for sport in sorted(sport_keys):
-        snap_id, pulled_at = get_latest_snapshot_meta(sport, market_db, region="us")
+        snap_id, pulled_at = get_latest_snapshot_meta(sport, db_market, region="us")
         if not snap_id:
             continue
+
         df = get_lines_for_snapshot(snap_id)
         if not df.empty:
             all_lines.append(df)
+
         if pulled_at:
             pulled_ats.append(pulled_at)
+
     if all_lines:
         return pd.concat(all_lines, ignore_index=True), pulled_ats
+
     return pd.DataFrame(), pulled_ats
 
 # =======================
