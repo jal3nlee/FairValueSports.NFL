@@ -628,15 +628,6 @@ def run_app():
         df_spread_lines, pulled_sp = fetch_market_lines(sport_keys, "spread")
         df_total_lines, pulled_tot = fetch_market_lines(sport_keys, "total")
 
-                # 🔍 Debugging: see how many rows are coming back from Supabase
-        st.write("Moneyline rows pulled:", len(df_ml_lines))
-        st.write("Spread rows pulled:", len(df_spread_lines))
-        st.write("Total rows pulled:", len(df_total_lines))
-        
-        if not df_spread_lines.empty:
-            with st.expander("Raw spread lines (first 20)"):
-                st.dataframe(df_spread_lines.head(20))
-
         # Filter by window
         def filter_by_window_df(df_any: pd.DataFrame) -> pd.DataFrame:
             if df_any.empty: return df_any
@@ -740,6 +731,12 @@ def run_app():
     
         df_ml_cons   = compute_consensus_fair_probs_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
         df_ml_best   = best_prices_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
+
+        if not df_sp_best.empty:
+            df_sp_best["line"] = df_sp_best["line"].astype(float)
+        if not df_sp_cons.empty:
+            df_sp_cons["line"] = df_sp_cons["line"].astype(float)
+        
         df_ml        = pd.merge(df_ml_best, df_ml_cons, on=["event_id","home_team","away_team"], how="inner") if (not df_ml_best.empty and not df_ml_cons.empty) else pd.DataFrame()
     
         df_sp_cons   = compute_consensus_fair_probs_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
