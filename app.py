@@ -353,13 +353,14 @@ PAGE_SIZE = 1000
 @st.cache_data(ttl=60, show_spinner=False)
 def get_latest_snapshot_meta(sport: str, market: str, region: str = "us"):
     try:
-        res = supabase.table("vw_latest_snapshot") \
-            .select("id,pulled_at") \
-            .eq("sport", sport) \
-            .eq("market", market) \
-            .eq("region", region) \
-            .limit(1) \
-            .execute()
+        res = supabase.table("odds_snapshots") \
+    .select("id,pulled_at") \
+    .eq("sport", sport) \
+    .eq("market", market) \
+    .eq("region", region) \
+    .order("pulled_at", desc=True) \
+    .limit(1) \
+    .execute()
         data = res.data or []
         if not data:
             return None, None
@@ -405,7 +406,7 @@ def fetch_market_lines(sport_keys: set[str], market_db: str):
 # =======================
 def build_market_from_lines_moneyline(df_lines: pd.DataFrame) -> pd.DataFrame:
     if df_lines.empty: return pd.DataFrame()
-    df = df_lines[(df_lines["market"]=="moneyline") & (df_lines["side"].isin(["home","away"]))].copy()
+    df = df_lines[(df_lines["market"]=="h2h") & (df_lines["side"].isin(["home","away"]))].copy()
     df["home_price"] = df.apply(lambda r: r["price"] if r["side"]=="home" else None, axis=1)
     df["away_price"] = df.apply(lambda r: r["price"] if r["side"]=="away" else None, axis=1)
     agg = df.groupby(["event_id","home_team","away_team","book","commence_time"], as_index=False).agg(
@@ -416,7 +417,7 @@ def build_market_from_lines_moneyline(df_lines: pd.DataFrame) -> pd.DataFrame:
 
 def build_market_from_lines_spread(df_lines: pd.DataFrame) -> pd.DataFrame:
     if df_lines.empty: return pd.DataFrame()
-    df = df_lines[(df_lines["market"]=="spread") & (df_lines["side"].isin(["home","away"]))].copy()
+    df = df_lines[(df_lines["market"]=="spreads") & (df_lines["side"].isin(["home","away"]))].copy()
     df["home_price"] = df.apply(lambda r: r["price"] if r["side"]=="home" else None, axis=1)
     df["away_price"] = df.apply(lambda r: r["price"] if r["side"]=="away" else None, axis=1)
     agg = df.groupby(["event_id","home_team","away_team","book","commence_time","line"], as_index=False).agg(
@@ -427,7 +428,7 @@ def build_market_from_lines_spread(df_lines: pd.DataFrame) -> pd.DataFrame:
 
 def build_market_from_lines_total(df_lines: pd.DataFrame) -> pd.DataFrame:
     if df_lines.empty: return pd.DataFrame()
-    df = df_lines[(df_lines["market"]=="total") & (df_lines["side"].isin(["over","under"]))].copy()
+    df = df_lines[(df_lines["market"]=="totals") & (df_lines["side"].isin(["over","under"]))].copy()
     df["over_price"]  = df.apply(lambda r: r["price"] if r["side"]=="over"  else None, axis=1)
     df["under_price"] = df.apply(lambda r: r["price"] if r["side"]=="under" else None, axis=1)
     agg = df.groupby(["event_id","home_team","away_team","book","commence_time","line"], as_index=False).agg(
