@@ -342,7 +342,8 @@ def infer_current_week_index(now_utc: datetime) -> int:
     return max(1, min(18, weeks))
 
 def sport_key_for_week(week_index: int) -> str:
-    return "americanfootball_nfl_preseason" if week_index == 0 else "americanfootball_nfl"
+    # All snapshots are saved as sport="NFL"
+    return "NFL"
 
 # =======================
 # Supabase odds readers
