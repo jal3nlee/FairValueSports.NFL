@@ -917,52 +917,43 @@ def run_app():
         else:
             st.dataframe(df_disp.set_index("Market"), use_container_width=True)
             
-        # === Best Odds by Team Tab ===
     with tabs[1]:
-        st.subheader("Best Odds by Team")
-
-        show_all_books = st.toggle("Show all books", value=False)
-
-        if df_ml_books.empty:
-            st.info("No odds data available.")
-        else:
-            if show_all_books:
-                # Pivot odds by book (wide view, like screenshot)
-                df_all = df_ml_books.copy()
-                df_all["Odds"] = df_all["price"].apply(fmt_odds)
-                df_pivot = df_all.pivot_table(
-                    index=["commence_time","home_team","away_team"],
-                    columns="book",
-                    values="Odds",
-                    aggfunc="first"
-                ).reset_index()
-
-                # Format date
-                df_pivot["commence_time"] = df_pivot["commence_time"].apply(fmt_date_et_str)
-                df_pivot = df_pivot.rename(columns={"commence_time": "Game Time"})
-                st.dataframe(df_pivot, use_container_width=True)
-
-            else:
-                # Best book only view
-                df_best = best_prices_h2h(df_ml_books)
-                df_best_disp = df_best.copy()
-                df_best_disp["Home Odds"] = df_best_disp["home_price"].apply(fmt_odds)
-                df_best_disp["Away Odds"] = df_best_disp["away_price"].apply(fmt_odds)
-
-                df_best_disp = df_best_disp[[
-                    "commence_time", "home_team", "Home Odds", "home_book",
-                    "away_team", "Away Odds", "away_book"
+        st.subheader("Best Odds by Sportsbook")
+    
+        # Build best-odds dataset from Moneyline consensus + best prices
+        if not df_ml_best.empty and not df_ml_cons.empty:
+            df_best = pd.merge(
+                df_ml_best, df_ml_cons,
+                on=["event_id", "home_team", "away_team"],
+                how="inner"
+            )
+    
+            # Keep only relevant display columns
+            if not df_best.empty:
+                df_best_disp = df_best[[
+                    "commence_time", "home_team", "home_price", "home_book",
+                    "away_team", "away_price", "away_book"
                 ]].rename(columns={
-                    "commence_time": "Game Time",
-                    "home_team": "Home",
-                    "away_team": "Away",
+                    "home_price": "Home Odds",
+                    "away_price": "Away Odds",
                     "home_book": "Best Home Book",
-                    "away_book": "Best Away Book"
+                    "away_book": "Best Away Book",
                 })
-
-                df_best_disp["Game Time"] = df_best_disp["Game Time"].apply(fmt_date_et_str)
+    
+                # Format datetime nicely
+                df_best_disp["Date"] = df_best_disp["commence_time"].apply(fmt_date_et_str)
+    
+                # Reorder so Date is second column
+                df_best_disp = df_best_disp[[
+                    "home_team", "Date", "Home Odds", "Best Home Book",
+                    "away_team", "Away Odds", "Best Away Book"
+                ]]
+    
                 st.dataframe(df_best_disp, use_container_width=True)
-
+            else:
+                st.info("No best odds available at the moment.")
+        else:
+            st.info("No best odds data available.")
 
 if __name__ == "__main__":
     run_app()
