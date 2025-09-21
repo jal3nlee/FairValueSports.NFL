@@ -744,7 +744,7 @@ def run_app():
     
         df_sp_cons   = compute_consensus_fair_probs_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
         df_sp_best   = best_prices_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
-        df_spread    = pd.merge(df_sp_best, df_sp_cons, on=["event_id","home_team","away_team"], how="inner") if (not df_sp_best.empty and not df_sp_cons.empty) else pd.DataFrame()
+        df_spread    = pd.merge(df_sp_best, df_sp_cons, on=["event_id","home_team","away_team", "line"], how="inner") if (not df_sp_best.empty and not df_sp_cons.empty) else pd.DataFrame()
     
         df_tot_cons  = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
         df_tot_best  = best_prices_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
