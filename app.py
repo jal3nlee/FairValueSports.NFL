@@ -801,7 +801,14 @@ def run_app():
             for _, r in df_in.iterrows():
                 date_str = fmt_date_et_str(r.get("commence_time"))
                 game_label = f"{r['home_team']} vs {r['away_team']}"
-                line = float(r.get("line"))
+                
+                # 🛠 Safely handle missing line
+                try:
+                    line = float(r.get("line")) if r.get("line") is not None else None
+                except Exception:
+                    line = None
+        
+                # Home side
                 if pd.notna(r.get("home_price")) and pd.notna(r.get("home_fair")):
                     fair_p, price = float(r["home_fair"]), int(r["home_price"])
                     ev_pct = expected_value_pct(fair_p, price)
@@ -810,11 +817,14 @@ def run_app():
                         "Market": "Spread",
                         "Date": date_str,
                         "Game": game_label, "Pick": r["home_team"],
-                        "Line": f"{line:+g}",
+                        "Line": f"{line:+g}" if line is not None else "",
                         "Best Odds": price, "Best Book": r.get("home_book"),
                         "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                        "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
+                        "Stake ($)": round((weekly_bankroll if authed else 1000.0) * 
+                                           (kelly_factor if authed else 0.5) * kelly, 2)
                     })
+        
+                # Away side
                 if pd.notna(r.get("away_price")) and pd.notna(r.get("away_fair")):
                     fair_p, price = float(r["away_fair"]), int(r["away_price"])
                     ev_pct = expected_value_pct(fair_p, price)
@@ -823,10 +833,11 @@ def run_app():
                         "Market": "Spread",
                         "Date": date_str,
                         "Game": game_label, "Pick": r["away_team"],
-                        "Line": f"{-line:+g}",
+                        "Line": f"{-line:+g}" if line is not None else "",
                         "Best Odds": price, "Best Book": r.get("away_book"),
                         "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
-                        "Stake ($)": round((weekly_bankroll if authed else 1000.0) * (kelly_factor if authed else 0.5) * kelly, 2)
+                        "Stake ($)": round((weekly_bankroll if authed else 1000.0) * 
+                                           (kelly_factor if authed else 0.5) * kelly, 2)
                     })
             return pd.DataFrame(rows)
     
