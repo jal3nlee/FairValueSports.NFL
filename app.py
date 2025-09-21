@@ -730,17 +730,17 @@ def run_app():
         df_total_books  = _apply_book_filter(df_total_books)
     
         df_ml_cons   = compute_consensus_fair_probs_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
-        df_ml_best   = best_prices_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()
-
-        if not df_sp_best.empty:
-            df_sp_best["line"] = df_sp_best["line"].astype(float)
-        if not df_sp_cons.empty:
-            df_sp_cons["line"] = df_sp_cons["line"].astype(float)
-        
+        df_ml_best   = best_prices_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()      
         df_ml        = pd.merge(df_ml_best, df_ml_cons, on=["event_id","home_team","away_team"], how="inner") if (not df_ml_best.empty and not df_ml_cons.empty) else pd.DataFrame()
-    
+        
         df_sp_cons   = compute_consensus_fair_probs_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
         df_sp_best   = best_prices_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
+
+        if "line" in df_sp_best.columns:
+            df_sp_best["line"] = df_sp_best["line"].astype(float)
+        if "line" in df_sp_cons.columns:
+            df_sp_cons["line"] = df_sp_cons["line"].astype(float)
+        
         df_spread    = pd.merge(df_sp_best, df_sp_cons, on=["event_id","home_team","away_team", "line"], how="inner") if (not df_sp_best.empty and not df_sp_cons.empty) else pd.DataFrame()
     
         df_tot_cons  = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
