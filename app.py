@@ -849,6 +849,28 @@ def run_app():
     df_sp_disp = make_rows_spread(df_spread) if not df_spread.empty else pd.DataFrame()
     df_tot_disp= make_rows_total(df_total) if not df_total.empty else pd.DataFrame()
 
+    st.subheader("Screened Picks")
+
+    # Show latest odds pulled timestamp
+    pulled_list = []
+    pulled_list.extend(pulled_ml or [])
+    pulled_list.extend(pulled_sp or [])
+    pulled_list.extend(pulled_tot or [])
+    latest_pull = max((parse_iso_dt_utc(p) for p in pulled_list if p), default=None)
+
+    if latest_pull:
+        pulled_at_et = latest_pull.astimezone(EASTERN)
+        st.markdown(
+            f"**Odds last pulled:** {pulled_at_et.strftime('%b %d, %Y %I:%M %p ET')}"
+        )
+    else:
+        st.markdown("**Odds last pulled:** (no snapshot available)")
+
+    # Keep the caption for window info
+    st.caption(
+        f"Window: {caption_label}  |  All times ET. Fair Win % is no-vig."
+    )
+    
     if market_choice == "Moneyline":
         df_disp = df_ml_disp
     elif market_choice == "Spread":
