@@ -493,15 +493,21 @@ def best_prices_h2h(df_evt_books: pd.DataFrame):
 def compute_consensus_fair_probs_spread(df_spreads: pd.DataFrame):
     if df_spreads.empty:
         return pd.DataFrame()
+
     tmp = df_spreads.copy()
     tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
     tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
-    agg = tmp.groupby(["event_id","home_team","away_team","line"]).agg(
-        home_imp_vig=("home_imp_vig","mean"),
-        away_imp_vig=("away_imp_vig","mean"),
-        commence_time=("commence_time","first")
+
+    # Consensus line = average across all books
+    agg = tmp.groupby(["event_id", "home_team", "away_team"]).agg(
+        consensus_line=("line", "mean"),
+        home_imp_vig=("home_imp_vig", "mean"),
+        away_imp_vig=("away_imp_vig", "mean"),
+        commence_time=("commence_time", "first")
     ).reset_index()
-    agg[["home_fair","away_fair"]] = agg.apply(
+
+    # Base fair win % at consensus line
+    agg[["home_fair", "away_fair"]] = agg.apply(
         lambda r: pd.Series(devig_two_way(r["home_imp_vig"], r["away_imp_vig"])),
         axis=1
     )
@@ -525,15 +531,21 @@ def best_prices_spread(df_spreads: pd.DataFrame):
 def compute_consensus_fair_probs_totals(df_totals: pd.DataFrame):
     if df_totals.empty:
         return pd.DataFrame()
+
     tmp = df_totals.copy()
-    tmp["over_imp_vig"]  = tmp["over_price"].apply(american_to_implied_prob)
+    tmp["over_imp_vig"] = tmp["over_price"].apply(american_to_implied_prob)
     tmp["under_imp_vig"] = tmp["under_price"].apply(american_to_implied_prob)
-    agg = tmp.groupby(["event_id","home_team","away_team","total"]).agg(
-        over_imp_vig=("over_imp_vig","mean"),
-        under_imp_vig=("under_imp_vig","mean"),
-        commence_time=("commence_time","first")
+
+    # Consensus total = average across all books
+    agg = tmp.groupby(["event_id", "home_team", "away_team"]).agg(
+        consensus_total=("total", "mean"),
+        over_imp_vig=("over_imp_vig", "mean"),
+        under_imp_vig=("under_imp_vig", "mean"),
+        commence_time=("commence_time", "first")
     ).reset_index()
-    agg[["over_fair","under_fair"]] = agg.apply(
+
+    # Base fair win % at consensus total
+    agg[["over_fair", "under_fair"]] = agg.apply(
         lambda r: pd.Series(devig_two_way(r["over_imp_vig"], r["under_imp_vig"])),
         axis=1
     )
@@ -738,27 +750,70 @@ def run_app():
         df_sp_best = pd.DataFrame()
         df_spread  = pd.DataFrame()
         
+        def _adjust_spread_fair(row):
+            if pd.isna(row.get("line")) or pd.isna(row.get("consensus_line")):
+                return row["home_fair"], row["away_fair"]
+        
+            diff = float(row["line"]) - float(row["consensus_line"])
+            adj_home, adj_away = row["home_fair"], row["away_fair"]
+        
+            # Sensitivity: 2.5% per half-point near 3/7, else 1%
+            key_nums = [3, 7]
+            step = 0.01  # default per half-point
+            if any(abs(round(row["consensus_line"]) - k) <= 0.5 for k in key_nums):
+                step = 0.025
+        
+            adj = diff * (2 * step)  # scale by point difference
+            adj_home -= adj
+            adj_away += adj
+        
+            return max(0, min(1, adj_home)), max(0, min(1, adj_away))
+        
         if not df_spread_books.empty:
             df_sp_cons = compute_consensus_fair_probs_spread(df_spread_books)
             df_sp_best = best_prices_spread(df_spread_books)
-        
-            if "line" in df_sp_best.columns:
-                df_sp_best["line"] = pd.to_numeric(df_sp_best["line"], errors="coerce")
-            if "line" in df_sp_cons.columns:
-                df_sp_cons["line"] = pd.to_numeric(df_sp_cons["line"], errors="coerce")
         
             if not df_sp_best.empty and not df_sp_cons.empty:
                 df_spread = pd.merge(
                     df_sp_best,
                     df_sp_cons,
-                    on=["event_id", "home_team", "away_team", "line"],
+                    on=["event_id", "home_team", "away_team"],
                     how="inner"
+                )
+                df_spread[["home_fair", "away_fair"]] = df_spread.apply(
+                    _adjust_spread_fair, axis=1, result_type="expand"
                 )
 
     
-        df_tot_cons  = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
-        df_tot_best  = best_prices_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
-        df_total     = pd.merge(df_tot_best, df_tot_cons, on=["event_id","home_team","away_team","total"], how="inner") if (not df_tot_best.empty and not df_tot_cons.empty) else pd.DataFrame()
+        def _adjust_total_fair(row):
+            if pd.isna(row.get("total")) or pd.isna(row.get("consensus_total")):
+                return row["over_fair"], row["under_fair"]
+        
+            diff = float(row["total"]) - float(row["consensus_total"])
+            adj_over, adj_under = row["over_fair"], row["under_fair"]
+        
+            # Flat ~1% per point adjustment
+            step = 0.01
+            adj = diff * step
+        
+            adj_over -= adj
+            adj_under += adj
+        
+            return max(0, min(1, adj_over)), max(0, min(1, adj_under))
+        
+        df_tot_cons = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
+        df_tot_best = best_prices_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
+        
+        if not df_tot_best.empty and not df_tot_cons.empty:
+            df_total = pd.merge(
+                df_tot_best,
+                df_tot_cons,
+                on=["event_id", "home_team", "away_team"],
+                how="inner"
+            )
+            df_total[["over_fair", "under_fair"]] = df_total.apply(
+                _adjust_total_fair, axis=1, result_type="expand"
+            )
     
         # Format helpers
         def fmt_odds(o):
