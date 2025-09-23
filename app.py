@@ -733,15 +733,28 @@ def run_app():
         df_ml_best   = best_prices_h2h(df_ml_books) if not df_ml_books.empty else pd.DataFrame()      
         df_ml        = pd.merge(df_ml_best, df_ml_cons, on=["event_id","home_team","away_team"], how="inner") if (not df_ml_best.empty and not df_ml_cons.empty) else pd.DataFrame()
         
-        df_sp_cons   = compute_consensus_fair_probs_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
-        df_sp_best   = best_prices_spread(df_spread_books) if not df_spread_books.empty else pd.DataFrame()
-
-        if "line" in df_sp_best.columns:
-            df_sp_best["line"] = df_sp_best["line"].astype(float)
-        if "line" in df_sp_cons.columns:
-            df_sp_cons["line"] = df_sp_cons["line"].astype(float)
+        # --- Spread handling ---
+        df_sp_cons = pd.DataFrame()
+        df_sp_best = pd.DataFrame()
+        df_spread  = pd.DataFrame()
         
-        df_spread    = pd.merge(df_sp_best, df_sp_cons, on=["event_id","home_team","away_team", "line"], how="inner") if (not df_sp_best.empty and not df_sp_cons.empty) else pd.DataFrame()
+        if not df_spread_books.empty:
+            df_sp_cons = compute_consensus_fair_probs_spread(df_spread_books)
+            df_sp_best = best_prices_spread(df_spread_books)
+        
+            if "line" in df_sp_best.columns:
+                df_sp_best["line"] = pd.to_numeric(df_sp_best["line"], errors="coerce")
+            if "line" in df_sp_cons.columns:
+                df_sp_cons["line"] = pd.to_numeric(df_sp_cons["line"], errors="coerce")
+        
+            if not df_sp_best.empty and not df_sp_cons.empty:
+                df_spread = pd.merge(
+                    df_sp_best,
+                    df_sp_cons,
+                    on=["event_id", "home_team", "away_team", "line"],
+                    how="inner"
+                )
+
     
         df_tot_cons  = compute_consensus_fair_probs_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
         df_tot_best  = best_prices_totals(df_total_books) if not df_total_books.empty else pd.DataFrame()
