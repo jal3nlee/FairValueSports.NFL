@@ -766,23 +766,25 @@ def run_app():
         
         def _adjust_spread_fair(row):
             if pd.isna(row.get("line")) or pd.isna(row.get("consensus_line")):
-                return row["home_fair"], row["away_fair"]
+                return 0.5, 0.5  # default baseline
         
             diff = float(row["line"]) - float(row["consensus_line"])
-            adj_home, adj_away = row["home_fair"], row["away_fair"]
         
-            # Sensitivity: 2.5% per half-point near 3/7, else 1%
+            # Sensitivity: 2.5% per half-point near 3/7, else 1% per half-point
             key_nums = [3, 7]
-            step = 0.01  # default per half-point
+            step = 0.01
             if any(abs(round(row["consensus_line"]) - k) <= 0.5 for k in key_nums):
                 step = 0.025
         
-            adj = diff * (2 * step)  # scale by point difference
-            adj_home -= adj
-            adj_away += adj
+            # Apply shift: each 0.5 line difference = step adjustment
+            shift = diff * (2 * step)
         
-            return max(0, min(1, adj_home)), max(0, min(1, adj_away))
+            # Home = 50% baseline adjusted; Away = complement
+            home_fair = max(0, min(1, 0.5 - shift))
+            away_fair = 1 - home_fair
         
+            return home_fair, away_fair
+
         if not df_spread_books.empty:
             df_sp_cons = compute_consensus_fair_probs_spread(df_spread_books)
             df_sp_best = best_prices_spread(df_spread_books)
