@@ -498,19 +498,28 @@ def compute_consensus_fair_probs_spread(df_spreads: pd.DataFrame):
     tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
     tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
 
-    # Consensus line = average across all books
-    agg = tmp.groupby(["event_id", "home_team", "away_team"]).agg(
-        consensus_line=("line", "mean"),
-        home_imp_vig=("home_imp_vig", "mean"),
-        away_imp_vig=("away_imp_vig", "mean"),
-        commence_time=("commence_time", "first")
+    # Weight lines by how close odds are to even money (-110ish)
+    tmp["home_dist"] = tmp["home_price"].apply(lambda o: abs(abs(int(o)) - 110) if pd.notna(o) else 999)
+    tmp["away_dist"] = tmp["away_price"].apply(lambda o: abs(abs(int(o)) - 110) if pd.notna(o) else 999)
+
+    # Anchor line = whichever side is closer to even money
+    tmp["anchor_line"] = tmp.apply(
+        lambda r: r["line"] if r["home_dist"] <= r["away_dist"] else -r["line"], axis=1
+    )
+    tmp["anchor_weight"] = tmp.apply(lambda r: 1.0 / (1.0 + min(r["home_dist"], r["away_dist"])), axis=1)
+
+    agg = tmp.groupby(["event_id", "home_team", "away_team"]).apply(
+        lambda g: pd.Series({
+            "consensus_line": (g["anchor_line"] * g["anchor_weight"]).sum() / g["anchor_weight"].sum(),
+            "home_imp_vig": g["home_imp_vig"].mean(),
+            "away_imp_vig": g["away_imp_vig"].mean(),
+            "commence_time": g["commence_time"].iloc[0]
+        })
     ).reset_index()
 
-    # Base fair win % at consensus line
-    agg[["home_fair", "away_fair"]] = agg.apply(
-        lambda r: pd.Series(devig_two_way(r["home_imp_vig"], r["away_imp_vig"])),
-        axis=1
-    )
+    # At consensus line: break-even 50/50
+    agg["home_fair"] = 0.5
+    agg["away_fair"] = 0.5
     return agg
 
 def best_prices_spread(df_spreads: pd.DataFrame):
@@ -536,19 +545,24 @@ def compute_consensus_fair_probs_totals(df_totals: pd.DataFrame):
     tmp["over_imp_vig"] = tmp["over_price"].apply(american_to_implied_prob)
     tmp["under_imp_vig"] = tmp["under_price"].apply(american_to_implied_prob)
 
-    # Consensus total = average across all books
-    agg = tmp.groupby(["event_id", "home_team", "away_team"]).agg(
-        consensus_total=("total", "mean"),
-        over_imp_vig=("over_imp_vig", "mean"),
-        under_imp_vig=("under_imp_vig", "mean"),
-        commence_time=("commence_time", "first")
+    tmp["over_dist"] = tmp["over_price"].apply(lambda o: abs(abs(int(o)) - 110) if pd.notna(o) else 999)
+    tmp["under_dist"] = tmp["under_price"].apply(lambda o: abs(abs(int(o)) - 110) if pd.notna(o) else 999)
+
+    tmp["anchor_total"] = tmp["total"]
+    tmp["anchor_weight"] = tmp.apply(lambda r: 1.0 / (1.0 + min(r["over_dist"], r["under_dist"])), axis=1)
+
+    agg = tmp.groupby(["event_id", "home_team", "away_team"]).apply(
+        lambda g: pd.Series({
+            "consensus_total": (g["anchor_total"] * g["anchor_weight"]).sum() / g["anchor_weight"].sum(),
+            "over_imp_vig": g["over_imp_vig"].mean(),
+            "under_imp_vig": g["under_imp_vig"].mean(),
+            "commence_time": g["commence_time"].iloc[0]
+        })
     ).reset_index()
 
-    # Base fair win % at consensus total
-    agg[["over_fair", "under_fair"]] = agg.apply(
-        lambda r: pd.Series(devig_two_way(r["over_imp_vig"], r["under_imp_vig"])),
-        axis=1
-    )
+    # At consensus total: break-even 50/50
+    agg["over_fair"] = 0.5
+    agg["under_fair"] = 0.5
     return agg
 
 def best_prices_totals(df_totals: pd.DataFrame):
