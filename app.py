@@ -912,7 +912,7 @@ def run_app():
                         "Market": "Spread",
                         "Date": date_str,
                         "Game": game_label, "Pick": r["away_team"],
-                        "Line": f"{-line:+g}" if line is not None else "",
+                        "Line": f"{line:+g}" if line is not None else "",
                         "Best Odds": price, "Best Book": r.get("away_book"),
                         "Fair Win %": fair_p, "EV%": ev_pct, "Kelly (u)": kelly,
                         "Stake ($)": round((weekly_bankroll if authed else 1000.0) * 
