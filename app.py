@@ -765,22 +765,28 @@ def run_app():
         
         def _adjust_spread_fair(row):
             if pd.isna(row.get("line")) or pd.isna(row.get("consensus_line")):
-                return 0.5, 0.5  # default baseline
+                return 0.5, 0.5  # baseline if missing
         
-            diff = float(row["line"]) - float(row["consensus_line"])
+            line = float(row["line"])
+            consensus = float(row["consensus_line"])
         
-            # Sensitivity: 2.5% per half-point near 3/7, else 1% per half-point
-            key_nums = [3, 7]
-            step = 0.01
-            if any(abs(round(row["consensus_line"]) - k) <= 0.5 for k in key_nums):
-                step = 0.025
+            # Distance in points between this line and consensus
+            diff = line - consensus
         
-            # Apply shift: each 0.5 line difference = step adjustment
+            # Key number sensitivity
+            step = 0.01  # 1% per half-point normally
+            if any(abs(round(consensus) - k) <= 0.5 for k in [3, 7]):
+                step = 0.025  # 2.5% per half-point at 3 or 7
+        
             shift = diff * (2 * step)
         
-            # Home = 50% baseline adjusted; Away = complement
-            home_fair = max(0, min(1, 0.5 - shift))
+            # Always anchor consensus at 50/50 and enforce symmetry
+            home_fair = 0.5 - shift
             away_fair = 1 - home_fair
+        
+            # Clamp to avoid impossible 0% or 100%
+            home_fair = max(0.01, min(0.99, home_fair))
+            away_fair = max(0.01, min(0.99, away_fair))
         
             return home_fair, away_fair
 
