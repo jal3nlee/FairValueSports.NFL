@@ -469,10 +469,9 @@ def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
         away_imp_vig=("away_imp_vig","mean"),
         commence_time=("commence_time","first")
     ).reset_index()
-    agg[["home_fair","away_fair"]] = agg.apply(
-        lambda r: pd.Series(devig_two_way(r["home_imp_vig"], r["away_imp_vig"])),
-        axis=1
-    )
+    # Base fair win % always 50/50 at consensus line
+    agg["home_fair"] = 0.5
+    agg["away_fair"] = 0.5
     return agg
 
 def best_prices_h2h(df_evt_books: pd.DataFrame):
