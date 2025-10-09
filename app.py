@@ -1148,62 +1148,204 @@ def run_app():
             
     with tabs[2]:
         st.subheader("Parlay Builder")
-
-        # User stake
+    
+        # --- Stake input ---
         stake = st.number_input("Stake ($)", min_value=1.0, value=10.0, step=1.0)
-
-        # Let user select multiple picks from available games
-        all_games = []
-        for df in [df_ml_disp, df_sp_disp, df_tot_disp]:
-            if not df.empty:
-                all_games.extend(df.to_dict("records"))
-
-        if not all_games:
-            st.info("No games available to build a parlay.")
-            return
-
-        picks = st.multiselect(
-            "Select legs for your parlay",
-            options=[f"{g['Market']} | {g['Game']} | {g['Pick']} {g.get('Line','')}" for g in all_games],
-            default=[],
-            help="Choose at least two bets."
-        )
-
-        if len(picks) < 2:
-            st.warning("Add at least 2 legs to calculate a parlay.")
+    
+        # --- Build nested dict for dropdowns ---
+        markets = {
+            "Moneyline": df_ml_books,
+            "Spread": df_spread_books,
+            "Total": df_total_books,
+        }
+    
+        nested_data = {}
+        for market_label, df in markets.items():
+            if df is None or df.empty:
+                continue
+            nested_data[market_label] = {}
+            for _, r in df.iterrows():
+                matchup = f"{r['home_team']} vs {r['away_team']}"
+                # Moneyline case
+                if market_label == "Moneyline":
+                    for side in ["home", "away"]:
+                        team = r["home_team"] if side == "home" else r["away_team"]
+                        price = r[f"{side}_price"]
+                        book = r["book"]
+                        pick_str = f"{team} ({fmt_odds(price)} {book})"
+                        nested_data[market_label].setdefault(matchup, []).append(
+                            {"Pick": team, "Line": "", "Odds": price, "Book": book, "Label": pick_str}
+                        )
+                # Spread case
+                elif market_label == "Spread":
+                    line = r["line"]
+                    for side in ["home", "away"]:
+                        team = r["home_team"] if side == "home" else r["away_team"]
+                        price = r[f"{side}_price"]
+                        book = r["book"]
+                        pick_str = f"{team} {line:+g} ({fmt_odds(price)} {book})"
+                        nested_data[market_label].setdefault(matchup, []).append(
+                            {"Pick": team, "Line": line, "Odds": price, "Book": book, "Label": pick_str}
+                        )
+                # Total case
+                elif market_label == "Total":
+                    total = r["total"]
+                    for side in ["over", "under"]:
+                        price = r[f"{side}_price"]
+                        book = r["book"]
+                        pick_str = f"{side.title()} {total:.1f} ({fmt_odds(price)} {book})"
+                        nested_data[market_label].setdefault(matchup, []).append(
+                            {"Pick": side.title(), "Line": total, "Odds": price, "Book": book, "Label": pick_str}
+                        )
+    
+        if not nested_data:
+            st.info("No data available to build a parlay.")
+            st.stop()
+    
+        # --- Dropdowns ---
+        col1, col2, col3 = st.columns([1, 1, 1.5])
+    
+        with col1:
+            market_choice = st.selectbox("Market", list(nested_data.keys()))
+    
+        with col2:
+            games_for_market = list(nested_data.get(market_choice, {}).keys())
+            game_choice = st.selectbox("Game", games_for_market)
+    
+        with col3:
+            lines_for_game = nested_data.get(market_choice, {}).get(game_choice, [])
+            line_choice = st.selectbox(
+                "Pick / Line / Book", [l["Label"] for l in lines_for_game] if lines_for_game else []
+            )
+    
+        # --- Add leg button ---
+        if "selected_legs" not in st.session_state:
+            st.session_state.selected_legs = []
+    
+        add_leg = st.button("Add Leg to Parlay", use_container_width=True)
+    
+        if add_leg and line_choice:
+            leg = next((l for l in lines_for_game if l["Label"] == line_choice), None)
+            if leg:
+                leg_entry = {
+                    "Market": market_choice,
+                    "Game": game_choice,
+                    "Pick": leg["Pick"],
+                    "Line": leg["Line"],
+                    "Odds": leg["Odds"],
+                    "Book": leg["Book"],
+                }
+                if leg_entry not in st.session_state.selected_legs:
+                    st.session_state.selected_legs.append(leg_entry)
+    
+        # --- Display selected legs ---
+        st.markdown("### Selected Legs")
+        if not st.session_state.selected_legs:
+            st.info("Select at least two legs to compare payouts.")
+            st.stop()
         else:
-            # Map picks back to odds
-            leg_rows = []
+            st.dataframe(pd.DataFrame(st.session_state.selected_legs))
+    
+        # --- Filter sportsbooks that cover all legs ---
+        all_books = sorted(
+            list({leg["Book"] for leg in st.session_state.selected_legs})
+        )
+        sportsbook_odds = {}
+    
+        # Build list of all books from your data
+        every_book = sorted(
+            list(
+                set(
+                    df_ml_books["book"].unique().tolist()
+                    + df_spread_books["book"].unique().tolist()
+                    + df_total_books["book"].unique().tolist()
+                )
+            )
+        )
+    
+        for book in every_book:
+            valid = True
             dec_odds = []
-            for pick in picks:
-                game = next((g for g in all_games if f"{g['Market']} | {g['Game']} | {g['Pick']} {g.get('Line','')}" == pick), None)
-                if not game:
-                    continue
-                price = int(game["Best Odds"].replace("+",""))
-                book  = game["Best Book"]
-                dec   = american_to_decimal(price)
-                dec_odds.append(dec)
-                leg_rows.append({
-                    "Game": game["Game"],
-                    "Market": game["Market"],
-                    "Pick": f"{game['Pick']} {game.get('Line','')}".strip(),
-                    "Odds": game["Best Odds"],
-                    "Sportsbook": book
-                })
-
-            # Calculate parlay odds
-            combined_dec = 1
-            for o in dec_odds:
-                combined_dec *= o
-            parlay_american = int((combined_dec - 1) * 100) if combined_dec >= 2 else int(-100 / (combined_dec - 1))
-
-            payout = round(stake * combined_dec, 2)
-
-            st.markdown(f"**Parlay Odds:** {parlay_american:+}")
-            st.markdown(f"**Potential Payout:** ${payout:,.2f} (including stake)")
-
-            st.dataframe(pd.DataFrame(leg_rows))
-
+            for leg in st.session_state.selected_legs:
+                # find if that book offers the same game and pick (same team and line)
+                df_source = markets.get(leg["Market"])
+                if df_source is None or df_source.empty:
+                    valid = False
+                    break
+    
+                subset = df_source[
+                    (df_source["book"] == book)
+                    & (df_source["home_team"] + " vs " + df_source["away_team"] == leg["Game"])
+                ]
+    
+                found = False
+                if leg["Market"] == "Moneyline":
+                    for side in ["home", "away"]:
+                        team = leg["Pick"]
+                        if side == "home" and team == subset["home_team"].iloc[0]:
+                            price = subset["home_price"].iloc[0]
+                            dec_odds.append(american_to_decimal(price))
+                            found = True
+                            break
+                        elif side == "away" and team == subset["away_team"].iloc[0]:
+                            price = subset["away_price"].iloc[0]
+                            dec_odds.append(american_to_decimal(price))
+                            found = True
+                            break
+                elif leg["Market"] == "Spread":
+                    subset = subset[subset["line"] == leg["Line"]]
+                    if not subset.empty:
+                        for side in ["home", "away"]:
+                            team = leg["Pick"]
+                            if team == subset[f"{side}_team"].iloc[0]:
+                                price = subset[f"{side}_price"].iloc[0]
+                                dec_odds.append(american_to_decimal(price))
+                                found = True
+                                break
+                elif leg["Market"] == "Total":
+                    subset = subset[subset["total"] == leg["Line"]]
+                    if not subset.empty:
+                        for side in ["over", "under"]:
+                            if leg["Pick"].lower() == side:
+                                price = subset[f"{side}_price"].iloc[0]
+                                dec_odds.append(american_to_decimal(price))
+                                found = True
+                                break
+    
+                if not found:
+                    valid = False
+                    break
+    
+            if valid and dec_odds:
+                combined_dec = 1
+                for d in dec_odds:
+                    combined_dec *= d
+                sportsbook_odds[book] = combined_dec
+    
+        # --- Display comparison table ---
+        if not sportsbook_odds:
+            st.warning("No sportsbook offers all selected legs.")
+        else:
+            results = []
+            for book, combined_dec in sportsbook_odds.items():
+                parlay_american = (
+                    int((combined_dec - 1) * 100)
+                    if combined_dec >= 2
+                    else int(-100 / (combined_dec - 1))
+                )
+                payout = round(stake * combined_dec, 2)
+                results.append(
+                    {
+                        "Sportsbook": book,
+                        "Decimal Odds": round(combined_dec, 3),
+                        "American Odds": parlay_american,
+                        "Payout ($)": payout,
+                    }
+                )
+    
+            df_results = pd.DataFrame(results).sort_values("Payout ($)", ascending=False)
+            st.markdown("### Parlay Comparison Across Sportsbooks")
+            st.dataframe(df_results, use_container_width=True)
 
 if __name__ == "__main__":
     run_app()
