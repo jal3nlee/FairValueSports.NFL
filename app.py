@@ -459,19 +459,35 @@ def build_market_from_lines_total(df_lines: pd.DataFrame) -> pd.DataFrame:
 # Consensus / Best price
 # =======================
 def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
+    """
+    Compute consensus fair win probabilities (no-vig) for moneylines.
+
+    - Uses all available sportsbook lines for each event.
+    - Converts odds → implied probabilities.
+    - Averages across books.
+    - Removes vig so the two sides sum to 1.
+    """
     if df_evt_books.empty:
         return pd.DataFrame()
-    tmp = df_evt_books.copy()
-    tmp["home_imp_vig"] = tmp["home_price"].apply(american_to_implied_prob)
-    tmp["away_imp_vig"] = tmp["away_price"].apply(american_to_implied_prob)
-    agg = tmp.groupby(["event_id","home_team","away_team"]).agg(
-        home_imp_vig=("home_imp_vig","mean"),
-        away_imp_vig=("away_imp_vig","mean"),
-        commence_time=("commence_time","first")
+
+    df = df_evt_books.copy()
+
+    # Convert American odds to implied probabilities (with vig)
+    df["home_imp_vig"] = df["home_price"].apply(american_to_implied_prob)
+    df["away_imp_vig"] = df["away_price"].apply(american_to_implied_prob)
+
+    # Average across all books for each event
+    agg = df.groupby(["event_id", "home_team", "away_team"]).agg(
+        home_imp_vig=("home_imp_vig", "mean"),
+        away_imp_vig=("away_imp_vig", "mean"),
+        commence_time=("commence_time", "first")
     ).reset_index()
-    # Base fair win % always 50/50 at consensus line
-    agg["home_fair"] = 0.5
-    agg["away_fair"] = 0.5
+
+    # Remove vig — normalize probabilities so they sum to 1
+    agg["home_fair"], agg["away_fair"] = zip(
+        *agg.apply(lambda r: devig_two_way(r["home_imp_vig"], r["away_imp_vig"]), axis=1)
+    )
+
     return agg
 
 def best_prices_h2h(df_evt_books: pd.DataFrame):
