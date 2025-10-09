@@ -780,31 +780,49 @@ def run_app():
         df_spread  = pd.DataFrame()
         
         def _adjust_spread_fair(row):
+            """
+            Adjust fair win probabilities based on how far the sportsbook's spread line
+            differs from the market consensus line.
+        
+            Consensus line is for the home team (negative = favorite).
+            Uses absolute-value comparison so +14 vs −14 are treated correctly.
+            """
+        
             if pd.isna(row.get("line")) or pd.isna(row.get("consensus_line")):
                 return 0.5, 0.5  # baseline if missing
         
             line = float(row["line"])
             consensus = float(row["consensus_line"])
         
-            # Distance in points between this line and consensus
-            diff = line - consensus
+            # Use absolute values so +14 vs −14 aren't treated as 28 apart
+            diff = abs(abs(line) - abs(consensus))
         
-            # Key number sensitivity
-            step = 0.01  # 1% per half-point normally
+            # Base sensitivity (percent per point)
+            step_per_point = 0.02
+            # Increase sensitivity near key numbers
             if any(abs(round(consensus) - k) <= 0.5 for k in [3, 7]):
-                step = 0.025  # 2.5% per half-point at 3 or 7
+                step_per_point = 0.025
         
-            shift = diff * (2 * step)
+            # Apply a cap to avoid unrealistic extremes
+            max_adj = 0.30
+            adj = min(diff * step_per_point, max_adj)
         
-            # Always anchor consensus at 50/50 and enforce symmetry
-            home_fair = 0.5 - shift
+            # Direction logic:
+            # If sportsbook line gives more points to underdog (larger abs(line)),
+            # home favorite’s fair win % should fall.
+            if abs(line) > abs(consensus):
+                home_fair = 0.5 - adj
+            else:
+                home_fair = 0.5 + adj
+        
             away_fair = 1 - home_fair
         
-            # Clamp to avoid impossible 0% or 100%
+            # Clamp to valid range
             home_fair = max(0.01, min(0.99, home_fair))
             away_fair = max(0.01, min(0.99, away_fair))
         
             return home_fair, away_fair
+
 
         if not df_spread_books.empty:
             df_sp_cons = compute_consensus_fair_probs_spread(df_spread_books)
