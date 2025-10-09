@@ -1037,7 +1037,20 @@ def run_app():
                 st.dataframe(df_disp.head(1).set_index("Market"))
                 st.warning("Sign in to see the full table and filters.")
         else:
+            # Convert EV% column back to numeric for sorting
+            df_disp["_ev_sort"] = (
+                df_disp["EV%"]
+                .astype(str)
+                .str.replace("%", "", regex=False)
+                .astype(float)
+            )
+        
+            # Sort by EV% descending
+            df_disp = df_disp.sort_values("_ev_sort", ascending=False).drop(columns=["_ev_sort"])
+        
+            # Display sorted table
             st.dataframe(df_disp.set_index("Market"), use_container_width=True)
+
             
     with tabs[1]:
         st.subheader("Best Odds by Sportsbook")
