@@ -1037,19 +1037,32 @@ def run_app():
                 st.dataframe(df_disp.head(1).set_index("Market"))
                 st.warning("Sign in to see the full table and filters.")
         else:
-            # Convert EV% column back to numeric for sorting
-            df_disp["_ev_sort"] = (
-                df_disp["EV%"]
-                .astype(str)
-                .str.replace("%", "", regex=False)
-                .astype(float)
+            # Allow user to choose sorting metric
+            sort_option = st.radio(
+                "Sort by:",
+                ["Stake ($)", "EV%"],
+                horizontal=True,
+                index=0,
+                help="Sort by Kelly-based stake (recommended) or by raw Expected Value."
             )
         
-            # Sort by EV% descending
-            df_disp = df_disp.sort_values("_ev_sort", ascending=False).drop(columns=["_ev_sort"])
+            # Prepare numeric column for sorting
+            if sort_option == "EV%":
+                df_disp["_sort"] = (
+                    df_disp["EV%"]
+                    .astype(str)
+                    .str.replace("%", "", regex=False)
+                    .astype(float)
+                )
+            else:
+                df_disp["_sort"] = pd.to_numeric(df_disp["Stake ($)"], errors="coerce")
+        
+            # Sort descending (largest first)
+            df_disp = df_disp.sort_values("_sort", ascending=False).drop(columns=["_sort"])
         
             # Display sorted table
             st.dataframe(df_disp.set_index("Market"), use_container_width=True)
+
 
             
     with tabs[1]:
