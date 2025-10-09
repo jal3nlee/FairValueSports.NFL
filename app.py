@@ -812,11 +812,22 @@ def run_app():
             # home favorite’s fair win % should fall.
             # Direction: if sportsbook line is more negative (harder for the favorite),
             # lower home fair win %. If it's less negative (easier), raise it.
-            if line < consensus:
-                home_fair = 0.5 - adj
-            else:
-                home_fair = 0.5 + adj
-                
+            # Direction logic: treat favorites (negative consensus) and underdogs (positive consensus) correctly
+            if consensus < 0:  # favorite
+                if line < consensus:
+                    # sportsbook line is more negative → harder for favorite
+                    home_fair = 0.5 - adj
+                else:
+                    # sportsbook line is less negative → easier for favorite
+                    home_fair = 0.5 + adj
+            else:  # underdog
+                if line > consensus:
+                    # sportsbook line gives more points to dog → easier
+                    home_fair = 0.5 + adj
+                else:
+                    # fewer points to dog → harder
+                    home_fair = 0.5 - adj
+
             away_fair = 1 - home_fair
         
             # Clamp to valid range
