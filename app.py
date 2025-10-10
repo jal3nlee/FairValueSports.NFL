@@ -1185,41 +1185,33 @@ def run_app():
                 st.warning("No spread data found for this game.")
                 lines = [0.0]
             else:
-                # Collect unique non-null lines
-                lines = sorted([l for l in subset["line"].unique() if pd.notna(l)])
+                # Collect all unique non-null spread lines
+                lines = sorted([float(l) for l in subset["line"].unique() if pd.notna(l)])
         
             home_team = subset["home_team"].iloc[0]
             away_team = subset["away_team"].iloc[0]
         
-            # If both + and - lines exist, median cancels to zero.
-            # Instead, take only negative lines if possible (favored side).
-            if len(lines) == 0:
-                avg_line = 0.0
-            else:
-                neg_lines = [l for l in lines if l < 0]
-                avg_line = float(np.median(neg_lines)) if len(neg_lines) else float(np.median(lines))
+            # Separate negative (favorites) and positive (underdogs)
+            neg_lines = sorted([l for l in lines if l < 0])
+            pos_lines = sorted([l for l in lines if l > 0])
         
-            # Assign correct sides
-            if avg_line < 0:
-                # Home favored (negative)
-                home_line = avg_line
-                away_line = -avg_line
-            else:
-                # Away favored (negative)
-                home_line = -avg_line
-                away_line = avg_line
+            # If no negatives exist, assume away favorite and flip
+            if not neg_lines and pos_lines:
+                neg_lines = [-l for l in pos_lines]
         
-            # Add picks
-            picks.append({
-                "label": f"{home_team} {home_line:+.1f}",
-                "pick": home_team,
-                "line": f"{home_line:+.1f}"
-            })
-            picks.append({
-                "label": f"{away_team} {away_line:+.1f}",
-                "pick": away_team,
-                "line": f"{away_line:+.1f}"
-            })
+            # Build dropdown entries for every line
+            for line in neg_lines:
+                picks.append({
+                    "label": f"{home_team} {line:+.1f}",
+                    "pick": home_team,
+                    "line": f"{line:+.1f}"
+                })
+                picks.append({
+                    "label": f"{away_team} {(-line):+.1f}",
+                    "pick": away_team,
+                    "line": f"{(-line):+.1f}"
+                })
+
 
     
         elif market_choice == "Total":
