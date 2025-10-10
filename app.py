@@ -1217,8 +1217,9 @@ def run_app():
             else:
                 st.warning("That leg is already added.")
     
-        # --- Display Selected Legs ---
+              # --- Display Selected Legs ---
         st.markdown("### Selected Legs")
+        
         if not st.session_state.selected_legs:
             st.info("Add at least two legs to compare parlay odds.")
             st.stop()
@@ -1230,17 +1231,26 @@ def run_app():
             header_cols[2].markdown("**Pick**")
             header_cols[3].markdown("**Line**")
             header_cols[4].markdown("**Action**")
-    
-            # Each row with Remove button
+        
+            # Each leg row with horizontal divider
             for i, leg in enumerate(st.session_state.selected_legs):
                 col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
                 col1.write(leg["Market"])
                 col2.write(leg["Game"])
                 col3.write(leg["Pick"])
                 col4.write(leg["Line"])
+        
+                # Inline remove button
                 if col5.button("Remove", key=f"remove_{i}"):
                     st.session_state.selected_legs.pop(i)
                     st.rerun()
+        
+                # Add subtle horizontal divider between rows
+                st.markdown(
+                    "<hr style='border: 0.5px solid #e0e0e0; margin: 4px 0;'>",
+                    unsafe_allow_html=True
+                )
+
     
         # --- Compare Button ---
         if not st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True):
