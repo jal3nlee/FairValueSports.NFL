@@ -1217,7 +1217,7 @@ def run_app():
             else:
                 st.warning("That leg is already added.")
     
-              # --- Display Selected Legs ---
+       # --- Display Selected Legs ---
         st.markdown("### Selected Legs")
         
         if not st.session_state.selected_legs:
@@ -1232,25 +1232,34 @@ def run_app():
             header_cols[3].markdown("**Line**")
             header_cols[4].markdown("**Action**")
         
-            # Each leg row with horizontal divider
+            # Table rows
             for i, leg in enumerate(st.session_state.selected_legs):
                 col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
                 col1.write(leg["Market"])
                 col2.write(leg["Game"])
                 col3.write(leg["Pick"])
                 col4.write(leg["Line"])
-        
-                # Inline remove button
                 if col5.button("Remove", key=f"remove_{i}"):
                     st.session_state.selected_legs.pop(i)
                     st.rerun()
         
-                # Add subtle horizontal divider between rows
-                st.markdown(
-                    "<hr style='border: 0.5px solid #e0e0e0; margin: 4px 0;'>",
-                    unsafe_allow_html=True
-                )
-
+            # --- Action buttons under table ---
+            colA, colB = st.columns([1, 1])
+            with colA:
+                compare_clicked = st.button("Compare Parlay Odds", use_container_width=True)
+            with colB:
+                if st.session_state.selected_legs:
+                    if st.button("Clear Last Selection", use_container_width=True):
+                        st.session_state.selected_legs.pop(-1)
+                        st.rerun()
+                else:
+                    st.button("Clear All Legs", use_container_width=True, disabled=True)
+        
+            # Handle Compare click
+            if not compare_clicked:
+                st.stop()
+        
+            # Continue with sportsbook comparison logic below...
     
         # --- Compare Button ---
         if not st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True):
