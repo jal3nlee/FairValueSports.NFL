@@ -1181,26 +1181,34 @@ def run_app():
     
         elif market_choice == "Spread":
             if "line" not in subset.columns or subset.empty:
-                lines = [0]
+                st.warning("No spread data found for this game.")
+                lines = [0.0]
             else:
-                lines = sorted(subset["line"].unique())
-    
+                # Collect unique non-null lines
+                lines = sorted([l for l in subset["line"].unique() if pd.notna(l)])
+        
             home_team = subset["home_team"].iloc[0]
             away_team = subset["away_team"].iloc[0]
-    
-            # If multiple books exist, take the median line to smooth noise
-            avg_line = float(pd.Series(lines).median()) if len(lines) > 0 else 0.0
-    
-            # Determine which team is favored based on sign
+        
+            # If both + and - lines exist, median cancels to zero.
+            # Instead, take only negative lines if possible (favored side).
+            if len(lines) == 0:
+                avg_line = 0.0
+            else:
+                neg_lines = [l for l in lines if l < 0]
+                avg_line = float(np.median(neg_lines)) if len(neg_lines) else float(np.median(lines))
+        
+            # Assign correct sides
             if avg_line < 0:
-                # Home is favorite (negative line)
+                # Home favored (negative)
                 home_line = avg_line
                 away_line = -avg_line
             else:
-                # Away is favorite (negative line)
+                # Away favored (negative)
                 home_line = -avg_line
                 away_line = avg_line
-    
+        
+            # Add picks
             picks.append({
                 "label": f"{home_team} {home_line:+.1f}",
                 "pick": home_team,
@@ -1211,6 +1219,7 @@ def run_app():
                 "pick": away_team,
                 "line": f"{away_line:+.1f}"
             })
+
     
         elif market_choice == "Total":
             totals = sorted(subset["total"].unique()) if "total" in subset.columns else [0]
