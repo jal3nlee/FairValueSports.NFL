@@ -1161,7 +1161,6 @@ def run_app():
     
         # --- Select Market ---
         market_choice = st.selectbox("Market", list(markets.keys()))
-    
         df_market = markets.get(market_choice)
         if df_market is None or df_market.empty:
             st.info("No data available for this market.")
@@ -1171,7 +1170,7 @@ def run_app():
         games_for_market = sorted(list(set(df_market["home_team"] + " vs " + df_market["away_team"])))
         game_choice = st.selectbox("Game", games_for_market)
     
-        # --- Build available picks for that game ---
+        # --- Second dropdown: Pick ---
         picks = []
         subset = df_market[(df_market["home_team"] + " vs " + df_market["away_team"]) == game_choice]
     
@@ -1199,10 +1198,9 @@ def run_app():
     
         pick_labels = [p["label"] for p in picks]
         pick_choice = st.selectbox("Pick", pick_labels)
-    
         selected_pick = next((p for p in picks if p["label"] == pick_choice), None)
     
-        # --- Initialize session state ---
+        # --- Session state init ---
         if "selected_legs" not in st.session_state:
             st.session_state.selected_legs = []
     
@@ -1219,39 +1217,32 @@ def run_app():
             else:
                 st.warning("That leg is already added.")
     
-        # --- Display selected legs ---
+        # --- Display Selected Legs ---
         st.markdown("### Selected Legs")
         if not st.session_state.selected_legs:
             st.info("Add at least two legs to compare parlay odds.")
             st.stop()
         else:
-            df_legs = pd.DataFrame(st.session_state.selected_legs)
-            # Add inline remove column
-            for i in range(len(df_legs)):
-                df_legs.loc[i, "Action"] = f"Remove {i}"
+            # Table header
+            header_cols = st.columns([2, 3, 2, 1, 1])
+            header_cols[0].markdown("**Market**")
+            header_cols[1].markdown("**Game**")
+            header_cols[2].markdown("**Pick**")
+            header_cols[3].markdown("**Line**")
+            header_cols[4].markdown("**Action**")
     
-            # Render table
-            edited_rows = st.data_editor(
-                df_legs,
-                key="legs_editor",
-                hide_index=True,
-                use_container_width=True,
-                disabled=["Market", "Game", "Pick", "Line"],
-                column_config={"Action": st.column_config.TextColumn("Action")},
-            )
+            # Each row with Remove button
+            for i, leg in enumerate(st.session_state.selected_legs):
+                col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
+                col1.write(leg["Market"])
+                col2.write(leg["Game"])
+                col3.write(leg["Pick"])
+                col4.write(leg["Line"])
+                if col5.button("Remove", key=f"remove_{i}"):
+                    st.session_state.selected_legs.pop(i)
+                    st.rerun()
     
-            # Detect if "Remove" clicked
-            removed_index = None
-            for i, row in enumerate(edited_rows["Action"]):
-                if row.strip().lower() == "remove":
-                    removed_index = i
-                    break
-    
-            if removed_index is not None:
-                st.session_state.selected_legs.pop(removed_index)
-                st.rerun()
-    
-        # --- Compare Parlay Odds button ---
+        # --- Compare Button ---
         if not st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True):
             st.stop()
     
@@ -1335,7 +1326,7 @@ def run_app():
                     }
                 )
     
-        # --- Display results ---
+        # --- Display Results ---
         if not sportsbook_results:
             st.warning("No sportsbook offers all selected legs.")
         else:
