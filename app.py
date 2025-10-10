@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 from pathlib import Path
 from PIL import Image
+from streamlit_cookies_manager import EncryptedCookieManager
 
 # =======================
 # Auth (Supabase)
@@ -21,12 +22,70 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# Reattach session tokens if present
-if st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"):
-    supabase.auth.set_session(
-        access_token=st.session_state.sb_access_token,
-        refresh_token=st.session_state.sb_refresh_token,
-    )
+# --- Cookie manager setup ---
+cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secret-key")
+if not cookies.ready():
+    st.stop()
+
+# --- Try to restore Supabase session from cookies ---
+if "access_token" in cookies and "refresh_token" in cookies:
+    try:
+        supabase.auth.set_session(
+            access_token=cookies["access_token"],
+            refresh_token=cookies["refresh_token"]
+        )
+        st.session_state.sb_access_token = cookies["access_token"]
+        st.session_state.sb_refresh_token = cookies["refresh_token"]
+    except Exception as e:
+        st.warning(f"Session reattach failed: {e}")
+
+# --- When user logs in successfully ---
+def save_session(session, remember=False):
+    """Store Supabase session in both session_state and optionally cookies"""
+    access_token = session["access_token"]
+    refresh_token = session["refresh_token"]
+
+    # Always save to Streamlit session
+    st.session_state.sb_access_token = access_token
+    st.session_state.sb_refresh_token = refresh_token
+
+    # Save to cookies only if user checked "Remember me"
+    if remember:
+        cookies["access_token"] = access_token
+        cookies["refresh_token"] = refresh_token
+        cookies.save()
+
+# --- Example login UI ---
+with st.expander("Login", expanded=True):
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+    remember_me = st.checkbox("Keep me logged in", value=True)
+
+    if st.button("Login"):
+        try:
+            result = supabase.auth.sign_in_with_password({"email": email, "password": password})
+            if result and result.session:
+                save_session(result.session, remember=remember_me)
+                st.success("Logged in successfully!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid credentials. Try again.")
+        except Exception as e:
+            st.error(f"Login failed: {e}")
+
+# --- Example logout ---
+if st.button("Logout"):
+    try:
+        supabase.auth.sign_out()
+        st.session_state.pop("sb_access_token", None)
+        st.session_state.pop("sb_refresh_token", None)
+        cookies.clear()
+        cookies.save()
+        st.success("Logged out successfully.")
+        st.experimental_rerun()
+    except Exception as e:
+        st.error(f"Logout failed: {e}")
+
 
 # ===== BRANDING =====
 ROOT = Path(__file__).parent.resolve()
