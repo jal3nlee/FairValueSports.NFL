@@ -1159,72 +1159,100 @@ def run_app():
             "Total": df_total_books,
         }
     
-        # --- Build dropdowns ---
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            market_choice = st.selectbox("Market", list(markets.keys()))
+        # --- Select Market ---
+        market_choice = st.selectbox("Market", list(markets.keys()))
     
-        df_selected_market = markets.get(market_choice)
-        if df_selected_market is None or df_selected_market.empty:
+        df_market = markets.get(market_choice)
+        if df_market is None or df_market.empty:
             st.info("No data available for this market.")
             st.stop()
     
-        with col2:
-            games_for_market = sorted(
-                list(set(df_selected_market["home_team"] + " vs " + df_selected_market["away_team"]))
-            )
-            game_choice = st.selectbox("Game", games_for_market)
+        # --- First dropdown: Game ---
+        games_for_market = sorted(list(set(df_market["home_team"] + " vs " + df_market["away_team"])))
+        game_choice = st.selectbox("Game", games_for_market)
     
-        # --- Build pick dropdown (team or over/under) ---
-        with col3:
-            if market_choice == "Moneyline":
-                teams = game_choice.split(" vs ")
-                pick_choice = st.selectbox("Pick", teams)
-                line_choice = ""
-            elif market_choice == "Spread":
-                teams = game_choice.split(" vs ")
-                pick_choice = st.selectbox("Pick", teams)
-                line_choice = "Consensus"
-            else:  # Total
-                pick_choice = st.selectbox("Pick", ["Over", "Under"])
-                line_choice = "Consensus"
+        # --- Build available picks for that game ---
+        picks = []
+        subset = df_market[(df_market["home_team"] + " vs " + df_market["away_team"]) == game_choice]
     
-        # --- Initialize state for legs ---
+        if market_choice == "Moneyline":
+            teams = [subset["home_team"].iloc[0], subset["away_team"].iloc[0]]
+            for team in teams:
+                picks.append({"label": f"{team} Moneyline", "pick": team, "line": "Moneyline"})
+    
+        elif market_choice == "Spread":
+            lines = sorted(subset["line"].unique()) if "line" in subset.columns else [0]
+            teams = [subset["home_team"].iloc[0], subset["away_team"].iloc[0]]
+            for line in lines:
+                for team in teams:
+                    picks.append({
+                        "label": f"{team} {line:+.1f}",
+                        "pick": team,
+                        "line": f"{line:+.1f}"
+                    })
+    
+        elif market_choice == "Total":
+            totals = sorted(subset["total"].unique()) if "total" in subset.columns else [0]
+            for total in totals:
+                picks.append({"label": f"Over {total:.1f}", "pick": "Over", "line": f"{total:.1f}"})
+                picks.append({"label": f"Under {total:.1f}", "pick": "Under", "line": f"{total:.1f}"})
+    
+        pick_labels = [p["label"] for p in picks]
+        pick_choice = st.selectbox("Pick", pick_labels)
+    
+        selected_pick = next((p for p in picks if p["label"] == pick_choice), None)
+    
+        # --- Initialize session state ---
         if "selected_legs" not in st.session_state:
             st.session_state.selected_legs = []
     
         # --- Add Leg button ---
-        add_leg = st.button("Add Leg to Parlay", use_container_width=True)
-        if add_leg:
+        if st.button("Add Leg to Parlay", use_container_width=True) and selected_pick:
             leg_entry = {
                 "Market": market_choice,
                 "Game": game_choice,
-                "Pick": pick_choice,
-                "Line": line_choice,
+                "Pick": selected_pick["pick"],
+                "Line": selected_pick["line"],
             }
             if leg_entry not in st.session_state.selected_legs:
                 st.session_state.selected_legs.append(leg_entry)
             else:
                 st.warning("That leg is already added.")
     
-        # --- Display selected legs with remove option ---
+        # --- Display selected legs ---
         st.markdown("### Selected Legs")
         if not st.session_state.selected_legs:
             st.info("Add at least two legs to compare parlay odds.")
             st.stop()
         else:
-            df_selected = pd.DataFrame(st.session_state.selected_legs)
-            st.dataframe(df_selected, use_container_width=True)
+            df_legs = pd.DataFrame(st.session_state.selected_legs)
+            # Add inline remove column
+            for i in range(len(df_legs)):
+                df_legs.loc[i, "Action"] = f"Remove {i}"
     
-            cols = st.columns(len(st.session_state.selected_legs))
-            for i, leg in enumerate(st.session_state.selected_legs):
-                if cols[i].button(f"❌ Remove {leg['Pick']}", key=f"remove_{i}"):
-                    st.session_state.selected_legs.pop(i)
-                    st.rerun()
+            # Render table
+            edited_rows = st.data_editor(
+                df_legs,
+                key="legs_editor",
+                hide_index=True,
+                use_container_width=True,
+                disabled=["Market", "Game", "Pick", "Line"],
+                column_config={"Action": st.column_config.TextColumn("Action")},
+            )
+    
+            # Detect if "Remove" clicked
+            removed_index = None
+            for i, row in enumerate(edited_rows["Action"]):
+                if row.strip().lower() == "remove":
+                    removed_index = i
+                    break
+    
+            if removed_index is not None:
+                st.session_state.selected_legs.pop(removed_index)
+                st.rerun()
     
         # --- Compare Parlay Odds button ---
-        compare = st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True)
-        if not compare:
+        if not st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True):
             st.stop()
     
         every_book = sorted(
@@ -1247,7 +1275,6 @@ def run_app():
                     valid = False
                     break
     
-                # Filter by game
                 subset = df_src[
                     (df_src["book"] == book)
                     & ((df_src["home_team"] + " vs " + df_src["away_team"]) == leg["Game"])
@@ -1256,19 +1283,16 @@ def run_app():
                     valid = False
                     break
     
-                # Moneyline
                 if leg["Market"] == "Moneyline":
                     row = subset.iloc[0]
                     if leg["Pick"] == row["home_team"]:
                         price = row["home_price"]
                     else:
                         price = row["away_price"]
-                    line_display = "Moneyline"
                     dec = american_to_decimal(price)
+                    line_display = "Moneyline"
     
-                # Spread
                 elif leg["Market"] == "Spread":
-                    # Use consensus line
                     avg_line = subset["line"].mean()
                     row = subset.iloc[0]
                     if leg["Pick"] == row["home_team"]:
@@ -1278,9 +1302,8 @@ def run_app():
                     dec = american_to_decimal(price)
                     line_display = f"{avg_line:+.1f}"
     
-                # Total
                 elif leg["Market"] == "Total":
-                    avg_total = subset["line"].mean() if "line" in subset.columns else subset["total"].mean()
+                    avg_total = subset["total"].mean() if "total" in subset.columns else 0
                     row = subset.iloc[0]
                     if leg["Pick"].lower() == "over":
                         price = row["over_price"]
@@ -1288,7 +1311,6 @@ def run_app():
                         price = row["under_price"]
                     dec = american_to_decimal(price)
                     line_display = f"{avg_total:.1f}"
-    
                 else:
                     valid = False
                     break
@@ -1318,8 +1340,9 @@ def run_app():
             st.warning("No sportsbook offers all selected legs.")
         else:
             df_results = pd.DataFrame(sportsbook_results).sort_values("Payout ($)", ascending=False)
-            st.markdown("### 🧮 Parlay Comparison Across Sportsbooks")
+            st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
+
 
 
 if __name__ == "__main__":
