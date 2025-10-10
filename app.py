@@ -1170,7 +1170,7 @@ def run_app():
         games_for_market = sorted(list(set(df_market["home_team"] + " vs " + df_market["away_team"])))
         game_choice = st.selectbox("Game", games_for_market)
     
-        # --- Second dropdown: Pick ---
+        # --- Second dropdown: Pick (team/line) ---
         picks = []
         subset = df_market[(df_market["home_team"] + " vs " + df_market["away_team"]) == game_choice]
     
@@ -1180,22 +1180,37 @@ def run_app():
                 picks.append({"label": f"{team} Moneyline", "pick": team, "line": "Moneyline"})
     
         elif market_choice == "Spread":
-            lines = sorted(subset["line"].unique()) if "line" in subset.columns else [0]
-            for line in lines:
-                home_team = subset["home_team"].iloc[0]
-                away_team = subset["away_team"].iloc[0]
+            if "line" not in subset.columns or subset.empty:
+                lines = [0]
+            else:
+                lines = sorted(subset["line"].unique())
     
-                # Home gets the line as-is, away gets the inverse
-                picks.append({
-                    "label": f"{home_team} {line:+.1f}",
-                    "pick": home_team,
-                    "line": f"{line:+.1f}"
-                })
-                picks.append({
-                    "label": f"{away_team} {(-line):+.1f}",
-                    "pick": away_team,
-                    "line": f"{(-line):+.1f}"
-                })
+            home_team = subset["home_team"].iloc[0]
+            away_team = subset["away_team"].iloc[0]
+    
+            # If multiple books exist, take the median line to smooth noise
+            avg_line = float(pd.Series(lines).median()) if len(lines) > 0 else 0.0
+    
+            # Determine which team is favored based on sign
+            if avg_line < 0:
+                # Home is favorite (negative line)
+                home_line = avg_line
+                away_line = -avg_line
+            else:
+                # Away is favorite (negative line)
+                home_line = -avg_line
+                away_line = avg_line
+    
+            picks.append({
+                "label": f"{home_team} {home_line:+.1f}",
+                "pick": home_team,
+                "line": f"{home_line:+.1f}"
+            })
+            picks.append({
+                "label": f"{away_team} {away_line:+.1f}",
+                "pick": away_team,
+                "line": f"{away_line:+.1f}"
+            })
     
         elif market_choice == "Total":
             totals = sorted(subset["total"].unique()) if "total" in subset.columns else [0]
@@ -1334,7 +1349,7 @@ def run_app():
                     else int(-100 / (combined_dec - 1))
                 )
     
-                # Add '+' for positive odds
+                # Add '+' prefix for positive odds
                 parlay_american_str = f"+{parlay_american}" if parlay_american > 0 else str(parlay_american)
     
                 payout = round(stake * combined_dec, 2)
@@ -1343,7 +1358,7 @@ def run_app():
                         "Sportsbook": book,
                         "Decimal Odds": round(combined_dec, 3),
                         "American Odds": parlay_american_str,
-                        "Payout ($)": payout,
+                        "Payout ($)": f"${payout:,.2f}",
                         "Lines Used": ", ".join(all_lines),
                     }
                 )
@@ -1355,6 +1370,7 @@ def run_app():
             df_results = pd.DataFrame(sportsbook_results).sort_values("Payout ($)", ascending=False)
             st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
+
 
 
 
