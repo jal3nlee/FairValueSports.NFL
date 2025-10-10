@@ -1217,54 +1217,45 @@ def run_app():
             else:
                 st.warning("That leg is already added.")
     
-       # --- Display Selected Legs ---
+        # --- Display Selected Legs ---
         st.markdown("### Selected Legs")
-        
+    
         if not st.session_state.selected_legs:
             st.info("Add at least two legs to compare parlay odds.")
             st.stop()
         else:
-            # Table header
-            header_cols = st.columns([2, 3, 2, 1, 1])
+            # Header
+            header_cols = st.columns([2, 3, 2, 1])
             header_cols[0].markdown("**Market**")
             header_cols[1].markdown("**Game**")
             header_cols[2].markdown("**Pick**")
             header_cols[3].markdown("**Line**")
-            header_cols[4].markdown("**Action**")
-        
-            # Table rows
-            for i, leg in enumerate(st.session_state.selected_legs):
-                col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
+    
+            # Rows
+            for leg in st.session_state.selected_legs:
+                col1, col2, col3, col4 = st.columns([2, 3, 2, 1])
                 col1.write(leg["Market"])
                 col2.write(leg["Game"])
                 col3.write(leg["Pick"])
                 col4.write(leg["Line"])
-                if col5.button("Remove", key=f"remove_{i}"):
-                    st.session_state.selected_legs.pop(i)
-                    st.rerun()
-        
-            # --- Action buttons under table ---
+    
+            # Action buttons below table
             colA, colB = st.columns([1, 1])
             with colA:
                 compare_clicked = st.button("Compare Parlay Odds", use_container_width=True)
             with colB:
-                if st.session_state.selected_legs:
+                if len(st.session_state.selected_legs) > 0:
                     if st.button("Clear Last Selection", use_container_width=True):
                         st.session_state.selected_legs.pop(-1)
                         st.rerun()
                 else:
-                    st.button("Clear All Legs", use_container_width=True, disabled=True)
-        
-            # Handle Compare click
+                    st.button("Clear Last Selection", use_container_width=True, disabled=True)
+    
+            # Stop until Compare is pressed
             if not compare_clicked:
                 st.stop()
-        
-            # Continue with sportsbook comparison logic below...
     
-        # --- Compare Button ---
-        if not st.button("Compare Parlay Odds Across Sportsbooks", use_container_width=True):
-            st.stop()
-    
+        # --- Sportsbook Comparison Logic ---
         every_book = sorted(
             set(
                 df_ml_books["book"].unique().tolist()
@@ -1352,7 +1343,6 @@ def run_app():
             df_results = pd.DataFrame(sportsbook_results).sort_values("Payout ($)", ascending=False)
             st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
-
 
 
 if __name__ == "__main__":
