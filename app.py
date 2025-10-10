@@ -1181,14 +1181,21 @@ def run_app():
     
         elif market_choice == "Spread":
             lines = sorted(subset["line"].unique()) if "line" in subset.columns else [0]
-            teams = [subset["home_team"].iloc[0], subset["away_team"].iloc[0]]
             for line in lines:
-                for team in teams:
-                    picks.append({
-                        "label": f"{team} {line:+.1f}",
-                        "pick": team,
-                        "line": f"{line:+.1f}"
-                    })
+                home_team = subset["home_team"].iloc[0]
+                away_team = subset["away_team"].iloc[0]
+    
+                # Home gets the line as-is, away gets the inverse
+                picks.append({
+                    "label": f"{home_team} {line:+.1f}",
+                    "pick": home_team,
+                    "line": f"{line:+.1f}"
+                })
+                picks.append({
+                    "label": f"{away_team} {(-line):+.1f}",
+                    "pick": away_team,
+                    "line": f"{(-line):+.1f}"
+                })
     
         elif market_choice == "Total":
             totals = sorted(subset["total"].unique()) if "total" in subset.columns else [0]
@@ -1298,10 +1305,11 @@ def run_app():
                     row = subset.iloc[0]
                     if leg["Pick"] == row["home_team"]:
                         price = row["home_price"]
+                        line_display = f"{avg_line:+.1f}"
                     else:
                         price = row["away_price"]
+                        line_display = f"{-avg_line:+.1f}"
                     dec = american_to_decimal(price)
-                    line_display = f"{avg_line:+.1f}"
     
                 elif leg["Market"] == "Total":
                     avg_total = subset["total"].mean() if "total" in subset.columns else 0
@@ -1325,12 +1333,16 @@ def run_app():
                     if combined_dec >= 2
                     else int(-100 / (combined_dec - 1))
                 )
+    
+                # Add '+' for positive odds
+                parlay_american_str = f"+{parlay_american}" if parlay_american > 0 else str(parlay_american)
+    
                 payout = round(stake * combined_dec, 2)
                 sportsbook_results.append(
                     {
                         "Sportsbook": book,
                         "Decimal Odds": round(combined_dec, 3),
-                        "American Odds": parlay_american,
+                        "American Odds": parlay_american_str,
                         "Payout ($)": payout,
                         "Lines Used": ", ".join(all_lines),
                     }
@@ -1343,6 +1355,7 @@ def run_app():
             df_results = pd.DataFrame(sportsbook_results).sort_values("Payout ($)", ascending=False)
             st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
+
 
 
 if __name__ == "__main__":
