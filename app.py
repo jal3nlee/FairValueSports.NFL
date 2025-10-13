@@ -1257,28 +1257,32 @@ def run_app():
             home_team = subset["home_team"].iloc[0]
             away_team = subset["away_team"].iloc[0]
         
-            # Separate negative (favorites) and positive (underdogs)
-            neg_lines = sorted([l for l in lines if l < 0])
-            pos_lines = sorted([l for l in lines if l > 0])
+            # Determine which team is actually favored (lower price → favorite)
+            avg_home_price = subset["home_price"].mean()
+            avg_away_price = subset["away_price"].mean()
         
-            # If no negatives exist, assume away favorite and flip
-            if not neg_lines and pos_lines:
-                neg_lines = [-l for l in pos_lines]
+            home_is_favorite = avg_home_price < avg_away_price  # smaller (more negative) American odds → favorite
         
             # Build dropdown entries for every line
-            for line in neg_lines:
+            for line in lines:
+                # If home is favored, home gets negative line; else, away gets negative
+                if home_is_favorite:
+                    home_line = -abs(line)
+                    away_line = abs(line)
+                else:
+                    home_line = abs(line)
+                    away_line = -abs(line)
+        
                 picks.append({
-                    "label": f"{home_team} {line:+.1f}",
+                    "label": f"{home_team} {home_line:+.1f}",
                     "pick": home_team,
-                    "line": f"{line:+.1f}"
+                    "line": f"{home_line:+.1f}"
                 })
                 picks.append({
-                    "label": f"{away_team} {(-line):+.1f}",
+                    "label": f"{away_team} {away_line:+.1f}",
                     "pick": away_team,
-                    "line": f"{(-line):+.1f}"
+                    "line": f"{away_line:+.1f}"
                 })
-
-
     
         elif market_choice == "Total":
             totals = sorted(subset["total"].unique()) if "total" in subset.columns else [0]
