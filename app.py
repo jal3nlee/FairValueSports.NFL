@@ -143,11 +143,6 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# --- Cookie manager setup ---
-cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secret-key")
-if not cookies.ready():
-    st.stop()
-
 # --- Restore Supabase session from cookies if possible ---
 if "access_token" in cookies and "refresh_token" in cookies:
     try:
