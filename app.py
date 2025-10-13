@@ -128,85 +128,140 @@ def _maybe_refresh_session():
 
 _maybe_refresh_session()
 
-def auth_view():
-    tabs = st.tabs(["Sign in", "Create account"])
-    with tabs[0]:
-        with st.form("signin_form", clear_on_submit=False):
-            email = st.text_input("Email", key="signin_email")
-            password = st.text_input("Password", type="password", key="signin_pw")
-            submit = st.form_submit_button("Sign in")
-        if submit:
-            try:
+# =======================
+# Auth (Supabase) with "Keep me logged in"
+# =======================
+from streamlit_cookies_manager import EncryptedCookieManager
+
+# --- Supabase credentials ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
+    st.stop()
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+# --- Cookie manager setup ---
+cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secret-key")
+if not cookies.ready():
+    st.stop()
+
+# --- Restore Supabase session from cookies if possible ---
+if "access_token" in cookies and "refresh_token" in cookies:
+    try:
+        supabase.auth.set_session(
+            access_token=cookies["access_token"],
+            refresh_token=cookies["refresh_token"]
+        )
+        st.session_state.sb_access_token = cookies["access_token"]
+        st.session_state.sb_refresh_token = cookies["refresh_token"]
+    except Exception as e:
+        st.warning(f"Session reattach failed: {e}")
+
+# --- Helper to save sessions ---
+def save_session(sess, remember=False):
+    """Store Supabase session in Streamlit and optionally in cookies."""
+    st.session_state.sb_access_token = sess.access_token
+    st.session_state.sb_refresh_token = sess.refresh_token
+    st.session_state.sb_session = sess
+    if remember:
+        cookies["access_token"] = sess.access_token
+        cookies["refresh_token"] = sess.refresh_token
+        cookies.save()
+
+# --- Determine if user is logged in ---
+authed = bool(st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"))
+
+# =======================
+# SIDEBAR UI
+# =======================
+with st.sidebar:
+    # --- Logo or Title ---
+    if LOGO_PATH:
+        st.image(str(LOGO_PATH), width=SIDEBAR_W)
+    else:
+        st.title("Fair Value Betting")
+
+    st.sidebar.divider()
+
+    # --- If logged in ---
+    if authed:
+        user = supabase.auth.get_user()
+        user_email = (
+            getattr(user.user, "email", None)
+            if user and getattr(user, "user", None)
+            else None
+        )
+        st.success(f"Signed in{f' as {user_email}' if user_email else ''}.")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Log out", use_container_width=True):
                 try:
                     supabase.auth.sign_out()
                 except Exception:
                     pass
-                res = supabase.auth.sign_in_with_password({"email": (email or "").strip(), "password": password})
-                sess = getattr(res, "session", None) or getattr(res, "session", {}) or None
-                if not sess:
-                    try:
-                        res2 = supabase.auth.refresh_session()
-                        sess = getattr(res2, "session", None) or getattr(res2, "session", {}) or None
-                    except Exception:
-                        pass
+                st.session_state.clear()
+                cookies.clear()
+                cookies.save()
+                st.rerun()
+        with col2:
+            st.caption("✅ Session active")
+
+    # --- If not logged in ---
+    else:
+        st.info("Free full access in September — create a free account to unlock filters and sorting.")
+
+        # --- Login form with "Keep me logged in" ---
+        with st.form("login_form_sidebar", clear_on_submit=False, border=True):
+            email = st.text_input("Email", key="signin_email_sidebar")
+            password = st.text_input("Password", type="password", key="signin_pw_sidebar")
+            remember_me = st.checkbox("Keep me logged in", value=True)
+            submit = st.form_submit_button("Sign in", use_container_width=True)
+
+        if submit:
+            try:
+                res = supabase.auth.sign_in_with_password(
+                    {"email": (email or "").strip(), "password": password}
+                )
+                sess = getattr(res, "session", None)
                 if sess:
-                    _store_session(sess)
-                    st.success("Signed in.")
-                    st.session_state.show_auth = False
+                    save_session(sess, remember=remember_me)
+                    st.success("Signed in successfully.")
                     st.rerun()
                 else:
-                    st.error("Sign-in succeeded but no session was returned. Please try again.")
+                    st.error("Sign-in succeeded but no session returned.")
             except Exception as e:
-                msg = str(e)
-                if "Invalid login credentials" in msg:
-                    st.error("Sign-in failed: invalid email or password.")
-                elif "Email not confirmed" in msg or "confirmed_at" in msg:
-                    st.error("Please verify your email address, then sign in.")
+                if "Invalid login credentials" in str(e):
+                    st.error("Invalid email or password.")
                 else:
-                    st.error(f"Sign-in failed: {msg or 'Unknown error.'}")
-    with tabs[1]:
-        with st.form("signup_form", clear_on_submit=False):
-            full_name = st.text_input("Name", key="signup_name")
-            email2 = st.text_input("Email", key="signup_email")
-            pw2 = st.text_input("Password", type="password", key="signup_pw")
-            submit2 = st.form_submit_button("Create account")
-        if submit2:
-            if not full_name.strip():
-                st.warning("Please enter your full name.")
-            elif not email2 or not pw2:
-                st.warning("Email and password are required.")
-            else:
-                try:
-                    supabase.auth.sign_up(
-                        {"email": email2.strip(), "password": pw2, "options": {"data": {"full_name": full_name.strip()}}}
-                    )
-                    st.success("Account created. Check your email to verify, then sign in.")
-                except Exception as e:
-                    st.error(f"Sign-up failed: {str(e) or 'Try a different email or password.'}")
+                    st.error(f"Sign-in failed: {e}")
 
-authed = st.session_state.sb_session is not None
+        # --- Optional Create Account Expander ---
+        with st.expander("Create account", expanded=False):
+            full_name = st.text_input("Name", key="signup_name_sidebar")
+            email2 = st.text_input("Email", key="signup_email_sidebar")
+            pw2 = st.text_input("Password", type="password", key="signup_pw_sidebar")
+            submit2 = st.button("Create Account", use_container_width=True)
+            if submit2:
+                if not full_name.strip():
+                    st.warning("Please enter your full name.")
+                elif not email2 or not pw2:
+                    st.warning("Email and password are required.")
+                else:
+                    try:
+                        supabase.auth.sign_up(
+                            {
+                                "email": email2.strip(),
+                                "password": pw2,
+                                "options": {"data": {"full_name": full_name.strip()}},
+                            }
+                        )
+                        st.success("Account created! Check your email to verify, then sign in.")
+                    except Exception as e:
+                        st.error(f"Sign-up failed: {str(e) or 'Try again.'}")
 
-# Account block
-with st.sidebar:
-    if authed:
-        u = getattr(st.session_state.sb_session, "user", None)
-        user_email = getattr(u, "email", None) or (getattr(u, "user_metadata", {}) or {}).get("email")
-        st.success(f"Signed in{f' as {user_email}' if user_email else ''}.")
-        if st.button("Log out"):
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
-            _clear_session()
-            st.rerun()
-    else:
-        st.info("Free full access in September—create a free account to unlock filters and sorting.")
-        if st.button("Sign in / Create account"):
-            st.session_state.show_auth = True
-
-    if st.session_state.show_auth and not authed:
-        with st.expander("Account", expanded=True):
-            auth_view()
 
 with st.sidebar.expander("How to use", expanded=False):
     st.markdown(
