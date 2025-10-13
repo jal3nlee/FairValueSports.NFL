@@ -186,15 +186,6 @@ def auth_view():
 
 authed = st.session_state.sb_session is not None
 
-# --- Sidebar ---
-with st.sidebar:
-    if LOGO_PATH:
-        st.image(str(LOGO_PATH), width=SIDEBAR_W)
-    else:
-        st.write("Fair Value Betting")
-
-st.sidebar.divider()
-
 # Account block
 with st.sidebar:
     if authed:
