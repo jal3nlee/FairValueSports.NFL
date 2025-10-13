@@ -1257,11 +1257,27 @@ def run_app():
             home_team = subset["home_team"].iloc[0]
             away_team = subset["away_team"].iloc[0]
         
-            # Determine which team is actually favored (lower price → favorite)
-            avg_home_price = subset["home_price"].mean()
-            avg_away_price = subset["away_price"].mean()
-        
-            home_is_favorite = avg_home_price < avg_away_price  # smaller (more negative) American odds → favorite
+            # --- Determine which team is actually favored ---
+            def implied_prob(odds):
+                try:
+                    o = float(odds)
+                    return 100 / (o + 100) if o > 0 else (-o) / (-o + 100)
+                except Exception:
+                    return None
+            
+            home_probs = [implied_prob(o) for o in subset["home_price"] if pd.notna(o)]
+            away_probs = [implied_prob(o) for o in subset["away_price"] if pd.notna(o)]
+            
+            avg_home_prob = sum(home_probs) / len(home_probs) if home_probs else 0.5
+            avg_away_prob = sum(away_probs) / len(away_probs) if away_probs else 0.5
+            
+            if avg_home_prob == avg_away_prob:
+                # fallback: use sign of line if available
+                first_line = float(subset["line"].iloc[0]) if "line" in subset.columns and not subset.empty else 0
+                home_is_favorite = first_line < 0
+            else:
+                home_is_favorite = avg_home_prob > avg_away_prob  # higher implied win prob = favorite
+
         
             # Build dropdown entries for every line
             for line in lines:
