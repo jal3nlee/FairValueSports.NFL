@@ -201,8 +201,6 @@ with st.sidebar:
                 cookies.clear()
                 cookies.save()
                 st.rerun()
-        with col2:
-            st.caption("✅ Session active")
 
     # --- If not logged in ---
     else:
