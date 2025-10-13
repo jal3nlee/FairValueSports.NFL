@@ -55,38 +55,6 @@ def save_session(session, remember=False):
         cookies["refresh_token"] = refresh_token
         cookies.save()
 
-# --- Example login UI ---
-with st.expander("Login", expanded=True):
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    remember_me = st.checkbox("Keep me logged in", value=True)
-
-    if st.button("Login"):
-        try:
-            result = supabase.auth.sign_in_with_password({"email": email, "password": password})
-            if result and result.session:
-                save_session(result.session, remember=remember_me)
-                st.success("Logged in successfully!")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid credentials. Try again.")
-        except Exception as e:
-            st.error(f"Login failed: {e}")
-
-# --- Example logout ---
-if st.button("Logout"):
-    try:
-        supabase.auth.sign_out()
-        st.session_state.pop("sb_access_token", None)
-        st.session_state.pop("sb_refresh_token", None)
-        cookies.clear()
-        cookies.save()
-        st.success("Logged out successfully.")
-        st.experimental_rerun()
-    except Exception as e:
-        st.error(f"Logout failed: {e}")
-
-
 # ===== BRANDING =====
 ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
