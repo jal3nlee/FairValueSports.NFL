@@ -1233,6 +1233,9 @@ def run_app():
     # -------------------------
     # TAB 2: Parlay Builder
     # -------------------------
+    # -------------------------
+    # TAB 2: Parlay Builder
+    # -------------------------
     with tabs[2]:
         if not authed:
             st.warning("🔒 Please sign in to use the Parlay Builder.")
@@ -1469,9 +1472,78 @@ def run_app():
             st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
 
+    # -------------------------
+    # TAB 3: Player Props (New)
+    # -------------------------
     with tabs[3]:
-        st.title("Player Props Debug Mode")
-        st.write("✅ Tab loaded successfully — testing API connection...")
+        st.title("🏈 Player Props Lookup")
+        st.write("✅ Tab loaded successfully — testing API connection.")
+
+        # 🔐 Load API key
+        API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
+        if not API_SPORTS_KEY:
+            st.error("⚠️ Missing API_SPORTS_KEY in environment variables.")
+            st.stop()
+
+        API_BASE = "https://v3.american-football.api-sports.io"
+        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
+
+        # --- Get Teams ---
+        @st.cache_data(ttl=3600)
+        def get_teams():
+            url = f"{API_BASE}/teams?league=1&season=2025"
+            r = requests.get(url, headers=HEADERS)
+            if r.status_code != 200:
+                st.error("Failed to fetch teams.")
+                return []
+            data = r.json().get("response", [])
+            teams = [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data]
+            return sorted(teams, key=lambda x: x["name"])
+
+        # --- Team Selector ---
+        teams = get_teams()
+        if not teams:
+            st.warning("No team data found.")
+            st.stop()
+
+        team_names = [t["name"] for t in teams]
+        team_map = {t["name"]: t["id"] for t in teams}
+        selected_team = st.selectbox("Select Team", team_names)
+
+        if selected_team:
+            team_id = team_map[selected_team]
+
+            # --- Fetch roster ---
+            url = f"{API_BASE}/players?team={team_id}&season=2025"
+            with st.spinner("Loading roster..."):
+                resp = requests.get(url, headers=HEADERS)
+                if resp.status_code != 200:
+                    st.error("Failed to load players.")
+                    st.stop()
+                data = resp.json().get("response", [])
+                players = [
+                    {"id": p["player"]["id"], "name": p["player"]["name"], "position": p["player"].get("position")}
+                    for p in data
+                ]
+
+            if not players:
+                st.warning("No players found for this team.")
+                st.stop()
+
+            # --- Filter by position ---
+            positions = sorted(set([p["position"] for p in players if p["position"]]))
+            pos_choice = st.selectbox("Position", ["All"] + positions)
+            if pos_choice != "All":
+                players = [p for p in players if p["position"] == pos_choice]
+
+            player_names = [p["name"] for p in players]
+            player_choice = st.selectbox("Select Player", player_names)
+
+            if player_choice:
+                player = next(p for p in players if p["name"] == player_choice)
+                st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+                st.success("Player lookup complete! Next: integrate prop lines and stats.")
+
     
 
 if __name__ == "__main__":
