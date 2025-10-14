@@ -1482,8 +1482,9 @@ def run_app():
     # TAB 3: Player Props (Fixed)
     # -------------------------
     with tabs[3]:
-        st.title("🏈 Player Props Lookup (v1 API)")
+        st.title("🏈 NFL Player Props — RB Lookup")
     
+        # --- Load API Key ---
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
         if not API_SPORTS_KEY:
             st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
@@ -1492,7 +1493,7 @@ def run_app():
         API_BASE = "https://v1.american-football.api-sports.io"
         HEADERS = {"x-apisports-key": API_SPORTS_KEY}
     
-        # --- Test connection ---
+        # --- Test API Connection ---
         st.info("Testing API connection...")
         try:
             resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
@@ -1524,6 +1525,7 @@ def run_app():
             st.warning("⚠️ No team data returned.")
             st.stop()
     
+        # --- Team Selection ---
         team_names = [t["name"] for t in teams]
         team_map = {t["name"]: t["id"] for t in teams}
         selected_team = st.selectbox("Select NFL Team", team_names)
@@ -1532,43 +1534,44 @@ def run_app():
             team_id = team_map[selected_team]
             with st.spinner(f"Loading roster for {selected_team}..."):
                 r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS)
+    
             if r.status_code != 200:
                 st.error("Failed to load player list.")
                 st.stop()
     
             data = r.json().get("response", [])
-            players = [
-                {
-                    "id": p["player"]["id"],
-                    "name": p["player"]["name"],
-                    "position": p["player"].get("position"),
-                    "age": p["player"].get("age"),
-                    "number": p["player"].get("number"),
-                }
-                for p in data
-            ]
-    
-            if not players:
-                st.warning("No players found.")
+            if not data:
+                st.warning("No players found for this team.")
                 st.stop()
     
-            # --- Position filter ---
-            positions = sorted(set([p["position"] for p in players if p["position"]]))
-            pos_choice = st.selectbox("Filter by Position", ["All"] + positions)
-            if pos_choice != "All":
-                players = [p for p in players if p["position"] == pos_choice]
+            # --- Filter for Running Backs (RB only) ---
+            rbs = []
+            for p in data:
+                player = p.get("player", {})
+                if player.get("position") == "RB":
+                    rbs.append({
+                        "id": player["id"],
+                        "name": player["name"],
+                        "position": player.get("position"),
+                        "age": player.get("age"),
+                        "number": player.get("number"),
+                    })
     
-            player_names = [p["name"] for p in players]
-            player_choice = st.selectbox("Select Player", player_names)
+            if not rbs:
+                st.warning("No RBs found for this team.")
+                st.stop()
     
-            if player_choice:
-                player = next(p for p in players if p["name"] == player_choice)
-                st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+            # --- Player Selection (RBs Only) ---
+            rb_names = [rb["name"] for rb in rbs]
+            selected_rb = st.selectbox("Select Running Back", rb_names)
+    
+            if selected_rb:
+                rb = next(rb for rb in rbs if rb["name"] == selected_rb)
+                st.subheader(f"{rb['name']} — {rb.get('position', 'N/A')}")
                 col1, col2 = st.columns(2)
-                col1.metric("Age", player.get("age", "N/A"))
-                col2.metric("Jersey #", player.get("number", "N/A"))
-                st.success("✅ Player lookup complete!")
-
+                col1.metric("Age", rb.get("age", "N/A"))
+                col2.metric("Jersey #", rb.get("number", "N/A"))
+                st.success("✅ RB lookup complete.")
 
     
 
