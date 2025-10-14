@@ -1470,82 +1470,85 @@ def run_app():
             st.dataframe(df_results, use_container_width=True)
 
     with tabs[3]:
-            st.title("NFL Player Prop Lookup")
-            st.write(
-                "Select a team to view its active roster. "
-            )
-        
-            # --- Load NFL Teams ---
-            def get_teams():
-                url = f"{API_BASE}/teams?league=1&season=2025"
-                r = requests.get(url, headers=HEADERS)
-                if r.status_code != 200:
-                    st.error("Failed to fetch teams.")
-                    return []
-                data = r.json().get("response", [])
-                teams = [
-                    {"id": t["team"]["id"], "name": t["team"]["name"], "code": t["team"]["code"]}
-                    for t in data
-                ]
-                return sorted(teams, key=lambda x: x["name"])
-        
-            # --- Load Players for Selected Team ---
-            def get_team_players(team_id):
-                url = f"{API_BASE}/players?team={team_id}&season=2025"
-                r = requests.get(url, headers=HEADERS)
-                if r.status_code != 200:
-                    st.error("Failed to fetch players for this team.")
-                    return []
-                data = r.json().get("response", [])
-                players = []
-                for item in data:
-                    p = item["player"]
-                    players.append({
-                        "id": p["id"],
-                        "name": p["name"],
-                        "position": p.get("position"),
-                        "age": p.get("age"),
-                        "number": p.get("number")
-                    })
-                return sorted(players, key=lambda x: x["name"])
-        
-            # --- Team Selection ---
-            teams = get_teams()
-            if not teams:
-                st.warning("No team data available.")
-            else:
-                team_names = [t["name"] for t in teams]
-                team_map = {t["name"]: t["id"] for t in teams}
-                selected_team = st.selectbox("Select a Team", team_names, key="team_select_tab3")
-        
-                if selected_team:
-                    team_id = team_map[selected_team]
-                    with st.spinner(f"Loading roster for {selected_team}..."):
-                        roster = get_team_players(team_id)
-        
-                    if roster:
-                        # --- Filter by Position ---
-                        positions = sorted(set(p["position"] for p in roster if p["position"]))
-                        position = st.selectbox("Filter by Position", ["All"] + positions, key="pos_select_tab3")
-                        if position != "All":
-                            roster = [p for p in roster if p["position"] == position]
-        
-                        # --- Player Selection ---
-                        player_names = [p["name"] for p in roster]
-                        selected_player = st.selectbox("Select Player", player_names, key="player_select_tab3")
-        
-                        if selected_player:
-                            player = next(p for p in roster if p["name"] == selected_player)
-                            st.subheader(f"{player['name']} — {player['position']}")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**Age:** {player.get('age', 'N/A')}")
-                            with col2:
-                                st.write(f"**Jersey #:** {player.get('number', 'N/A')}")
-        
-                            st.info("Next step: display upcoming opponent, stats, and prop lines.")
-                    else:
-                        st.warning("No players found for this team.")
+        st.title("Player Props")
+    
+        st.write(
+            "Select a team to view its active roster. "
+            "This is the first phase of the Player Prop Tool, powered by API-Sports."
+        )
+    
+        # --- Load NFL Teams ---
+        def get_teams():
+            url = f"{API_BASE}/teams?league=1&season=2025"
+            r = requests.get(url, headers=HEADERS)
+            if r.status_code != 200:
+                st.error("Failed to fetch teams.")
+                return []
+            data = r.json().get("response", [])
+            teams = [
+                {"id": t["team"]["id"], "name": t["team"]["name"], "code": t["team"]["code"]}
+                for t in data
+            ]
+            return sorted(teams, key=lambda x: x["name"])
+    
+        # --- Load Players for Selected Team ---
+        def get_team_players(team_id):
+            url = f"{API_BASE}/players?team={team_id}&season=2025"
+            r = requests.get(url, headers=HEADERS)
+            if r.status_code != 200:
+                st.error("Failed to fetch players for this team.")
+                return []
+            data = r.json().get("response", [])
+            players = []
+            for item in data:
+                p = item["player"]
+                players.append({
+                    "id": p["id"],
+                    "name": p["name"],
+                    "position": p.get("position"),
+                    "age": p.get("age"),
+                    "number": p.get("number")
+                })
+            return sorted(players, key=lambda x: x["name"])
+    
+        # --- Team Selection ---
+        teams = get_teams()
+        if not teams:
+            st.warning("No team data available.")
+        else:
+            team_names = [t["name"] for t in teams]
+            team_map = {t["name"]: t["id"] for t in teams}
+            selected_team = st.selectbox("Select a Team", team_names, key="team_select_tab3")
+    
+            if selected_team:
+                team_id = team_map[selected_team]
+                with st.spinner(f"Loading roster for {selected_team}..."):
+                    roster = get_team_players(team_id)
+    
+                if roster:
+                    # --- Filter by Position ---
+                    positions = sorted(set(p["position"] for p in roster if p["position"]))
+                    position = st.selectbox("Filter by Position", ["All"] + positions, key="pos_select_tab3")
+                    if position != "All":
+                        roster = [p for p in roster if p["position"] == position]
+    
+                    # --- Player Selection ---
+                    player_names = [p["name"] for p in roster]
+                    selected_player = st.selectbox("Select Player", player_names, key="player_select_tab3")
+    
+                    if selected_player:
+                        player = next(p for p in roster if p["name"] == selected_player)
+                        st.subheader(f"{player['name']} — {player['position']}")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Age:** {player.get('age', 'N/A')}")
+                        with col2:
+                            st.write(f"**Jersey #:** {player.get('number', 'N/A')}")
+    
+                        st.info("Next step: display upcoming opponent, stats, and prop lines.")
+                else:
+                    st.warning("No players found for this team.")
+
 
 
 if __name__ == "__main__":
