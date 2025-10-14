@@ -1479,95 +1479,95 @@ def run_app():
     # TAB 3: Player Props (New)
     # -------------------------
     # -------------------------
-# TAB 3: Player Props (Fixed)
-# -------------------------
-with tabs[3]:
-    st.title("🏈 Player Props Lookup (v1 API)")
-
-    API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-    if not API_SPORTS_KEY:
-        st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
-        st.stop()
-
-    API_BASE = "https://v1.american-football.api-sports.io"
-    HEADERS = {"x-apisports-key": API_SPORTS_KEY}
-
-    # --- Test connection ---
-    st.info("Testing API connection...")
-    try:
-        resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
-        if resp.status_code == 200:
-            st.success("✅ Connected to API successfully!")
-        else:
-            st.error(f"❌ API returned {resp.status_code}: {resp.text}")
+    # TAB 3: Player Props (Fixed)
+    # -------------------------
+    with tabs[3]:
+        st.title("🏈 Player Props Lookup (v1 API)")
+    
+        API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
+        if not API_SPORTS_KEY:
+            st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
             st.stop()
-    except Exception as e:
-        st.error(f"❌ Connection failed: {e}")
-        st.stop()
-
-    # --- Fetch Teams ---
-    @st.cache_data(ttl=3600)
-    def get_teams():
-        url = f"{API_BASE}/teams?league=1&season=2025"
-        r = requests.get(url, headers=HEADERS)
-        if r.status_code != 200:
-            st.error(f"Failed to fetch teams ({r.status_code}).")
-            return []
-        data = r.json().get("response", [])
-        return sorted(
-            [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data],
-            key=lambda x: x["name"]
-        )
-
-    teams = get_teams()
-    if not teams:
-        st.warning("⚠️ No team data returned.")
-        st.stop()
-
-    team_names = [t["name"] for t in teams]
-    team_map = {t["name"]: t["id"] for t in teams}
-    selected_team = st.selectbox("Select NFL Team", team_names)
-
-    if selected_team:
-        team_id = team_map[selected_team]
-        with st.spinner(f"Loading roster for {selected_team}..."):
-            r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS)
-        if r.status_code != 200:
-            st.error("Failed to load player list.")
+    
+        API_BASE = "https://v1.american-football.api-sports.io"
+        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
+    
+        # --- Test connection ---
+        st.info("Testing API connection...")
+        try:
+            resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
+            if resp.status_code == 200:
+                st.success("✅ Connected to API successfully!")
+            else:
+                st.error(f"❌ API returned {resp.status_code}: {resp.text}")
+                st.stop()
+        except Exception as e:
+            st.error(f"❌ Connection failed: {e}")
             st.stop()
-
-        data = r.json().get("response", [])
-        players = [
-            {
-                "id": p["player"]["id"],
-                "name": p["player"]["name"],
-                "position": p["player"].get("position"),
-                "age": p["player"].get("age"),
-                "number": p["player"].get("number"),
-            }
-            for p in data
-        ]
-
-        if not players:
-            st.warning("No players found.")
+    
+        # --- Fetch Teams ---
+        @st.cache_data(ttl=3600)
+        def get_teams():
+            url = f"{API_BASE}/teams?league=1&season=2025"
+            r = requests.get(url, headers=HEADERS)
+            if r.status_code != 200:
+                st.error(f"Failed to fetch teams ({r.status_code}).")
+                return []
+            data = r.json().get("response", [])
+            return sorted(
+                [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data],
+                key=lambda x: x["name"]
+            )
+    
+        teams = get_teams()
+        if not teams:
+            st.warning("⚠️ No team data returned.")
             st.stop()
-
-        # --- Position filter ---
-        positions = sorted(set([p["position"] for p in players if p["position"]]))
-        pos_choice = st.selectbox("Filter by Position", ["All"] + positions)
-        if pos_choice != "All":
-            players = [p for p in players if p["position"] == pos_choice]
-
-        player_names = [p["name"] for p in players]
-        player_choice = st.selectbox("Select Player", player_names)
-
-        if player_choice:
-            player = next(p for p in players if p["name"] == player_choice)
-            st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
-            col1, col2 = st.columns(2)
-            col1.metric("Age", player.get("age", "N/A"))
-            col2.metric("Jersey #", player.get("number", "N/A"))
-            st.success("✅ Player lookup complete!")
+    
+        team_names = [t["name"] for t in teams]
+        team_map = {t["name"]: t["id"] for t in teams}
+        selected_team = st.selectbox("Select NFL Team", team_names)
+    
+        if selected_team:
+            team_id = team_map[selected_team]
+            with st.spinner(f"Loading roster for {selected_team}..."):
+                r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS)
+            if r.status_code != 200:
+                st.error("Failed to load player list.")
+                st.stop()
+    
+            data = r.json().get("response", [])
+            players = [
+                {
+                    "id": p["player"]["id"],
+                    "name": p["player"]["name"],
+                    "position": p["player"].get("position"),
+                    "age": p["player"].get("age"),
+                    "number": p["player"].get("number"),
+                }
+                for p in data
+            ]
+    
+            if not players:
+                st.warning("No players found.")
+                st.stop()
+    
+            # --- Position filter ---
+            positions = sorted(set([p["position"] for p in players if p["position"]]))
+            pos_choice = st.selectbox("Filter by Position", ["All"] + positions)
+            if pos_choice != "All":
+                players = [p for p in players if p["position"] == pos_choice]
+    
+            player_names = [p["name"] for p in players]
+            player_choice = st.selectbox("Select Player", player_names)
+    
+            if player_choice:
+                player = next(p for p in players if p["name"] == player_choice)
+                st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+                col1, col2 = st.columns(2)
+                col1.metric("Age", player.get("age", "N/A"))
+                col2.metric("Jersey #", player.get("number", "N/A"))
+                st.success("✅ Player lookup complete!")
 
 
     
