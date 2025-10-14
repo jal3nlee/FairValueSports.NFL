@@ -3,6 +3,7 @@ import os, math
 import pandas as pd
 import streamlit as st
 import numpy as np
+import requests
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
@@ -26,6 +27,17 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secret-key")
 if not cookies.ready():
     st.stop()
+
+# -------------------------------------------------------
+# 🔐 Load API Key (from Render Environment Variables)
+# -------------------------------------------------------
+API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
+if not API_SPORTS_KEY:
+    st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
+    st.stop()
+
+API_BASE = "https://v3.american-football.api-sports.io"
+HEADERS = {"x-apisports-key": API_SPORTS_KEY}
 
 # --- Try to restore Supabase session from cookies ---
 if "access_token" in cookies and "refresh_token" in cookies:
