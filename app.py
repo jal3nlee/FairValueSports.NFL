@@ -1471,26 +1471,8 @@ def run_app():
 
     with tabs[3]:
         st.title("Player Props Debug Mode")
-    
         st.write("✅ Tab loaded successfully — testing API connection...")
     
-        try:
-            url = f"{API_BASE}/teams?league=1&season=2025"
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            st.write("🔹 Status Code:", r.status_code)
-    
-            if r.status_code == 200:
-                data = r.json()
-                st.write("✅ API response received!")
-                st.json(data.get("response", [])[:2])  # show first two teams
-            else:
-                st.error(f"❌ Failed to fetch teams (Status {r.status_code})")
-                st.write("Raw response:", r.text)
-    
-        except Exception as e:
-            st.error(f"💥 Exception during API call: {e}")
-
-
 
 if __name__ == "__main__":
     run_app()
