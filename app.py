@@ -1562,6 +1562,7 @@ def run_app():
                 col2.metric("Jersey #", rb.get("number", "N/A"))
                 st.success("✅ RB lookup complete.")
 
+
     
 
 if __name__ == "__main__":
