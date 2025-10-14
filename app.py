@@ -28,17 +28,6 @@ cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secre
 if not cookies.ready():
     st.stop()
 
-# -------------------------------------------------------
-# 🔐 Load API Key (from Render Environment Variables)
-# -------------------------------------------------------
-API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-if not API_SPORTS_KEY:
-    st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
-    st.stop()
-
-API_BASE = "https://v3.american-football.api-sports.io"
-HEADERS = {"x-apisports-key": API_SPORTS_KEY}
-
 # --- Try to restore Supabase session from cookies ---
 if "access_token" in cookies and "refresh_token" in cookies:
     try:
