@@ -1478,107 +1478,97 @@ def run_app():
         # -------------------------
     # TAB 3: Player Props (New)
     # -------------------------
-    with tabs[3]:
-        st.title("🏈 Player Props Lookup")
+    # -------------------------
+# TAB 3: Player Props (Fixed)
+# -------------------------
+with tabs[3]:
+    st.title("🏈 Player Props Lookup (v1 API)")
 
-        # --- Load API Key ---
-        API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-        if not API_SPORTS_KEY:
-            st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
+    API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
+    if not API_SPORTS_KEY:
+        st.error("⚠️ Missing API_SPORTS_KEY in Render environment variables.")
+        st.stop()
+
+    API_BASE = "https://v1.american-football.api-sports.io"
+    HEADERS = {"x-apisports-key": API_SPORTS_KEY}
+
+    # --- Test connection ---
+    st.info("Testing API connection...")
+    try:
+        resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            st.success("✅ Connected to API successfully!")
+        else:
+            st.error(f"❌ API returned {resp.status_code}: {resp.text}")
+            st.stop()
+    except Exception as e:
+        st.error(f"❌ Connection failed: {e}")
+        st.stop()
+
+    # --- Fetch Teams ---
+    @st.cache_data(ttl=3600)
+    def get_teams():
+        url = f"{API_BASE}/teams?league=1&season=2025"
+        r = requests.get(url, headers=HEADERS)
+        if r.status_code != 200:
+            st.error(f"Failed to fetch teams ({r.status_code}).")
+            return []
+        data = r.json().get("response", [])
+        return sorted(
+            [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data],
+            key=lambda x: x["name"]
+        )
+
+    teams = get_teams()
+    if not teams:
+        st.warning("⚠️ No team data returned.")
+        st.stop()
+
+    team_names = [t["name"] for t in teams]
+    team_map = {t["name"]: t["id"] for t in teams}
+    selected_team = st.selectbox("Select NFL Team", team_names)
+
+    if selected_team:
+        team_id = team_map[selected_team]
+        with st.spinner(f"Loading roster for {selected_team}..."):
+            r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS)
+        if r.status_code != 200:
+            st.error("Failed to load player list.")
             st.stop()
 
-        # --- API Connection Helper ---
-        import time
-
-        def make_request(url, headers, retries=3, delay=2):
-            """Try API call up to N times before failing."""
-            for attempt in range(1, retries + 1):
-                try:
-                    r = requests.get(url, headers=headers, timeout=10)
-                    if r.status_code == 200:
-                        return r
-                    else:
-                        st.warning(f"Attempt {attempt}: Received status {r.status_code}")
-                except requests.exceptions.RequestException as e:
-                    st.warning(f"Attempt {attempt} failed: {e}")
-                time.sleep(delay)
-            return None
-
-        # --- Try Primary API-Sports domain first ---
-        API_BASE = "https://v3.american-football.api-sports.io"
-        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
-
-        st.info("🔍 Testing API connection...")
-        status_url = f"{API_BASE}/status"
-        resp = make_request(status_url, HEADERS, retries=2, delay=1)
-
-        # --- Fallback to RapidAPI if needed ---
-        if not resp:
-            st.warning("Primary API-Sports domain not reachable. Trying RapidAPI fallback...")
-            API_BASE = "https://api-american-football.p.rapidapi.com"
-            HEADERS = {
-                "x-rapidapi-key": API_SPORTS_KEY,
-                "x-rapidapi-host": "api-american-football.p.rapidapi.com"
+        data = r.json().get("response", [])
+        players = [
+            {
+                "id": p["player"]["id"],
+                "name": p["player"]["name"],
+                "position": p["player"].get("position"),
+                "age": p["player"].get("age"),
+                "number": p["player"].get("number"),
             }
-            resp = make_request(status_url, HEADERS, retries=2, delay=1)
+            for p in data
+        ]
 
-        # --- Connection check ---
-        if not resp:
-            st.error("❌ Could not connect to either API endpoint. Check your Render networking or plan access.")
+        if not players:
+            st.warning("No players found.")
             st.stop()
 
-        st.success("✅ API connection successful!")
+        # --- Position filter ---
+        positions = sorted(set([p["position"] for p in players if p["position"]]))
+        pos_choice = st.selectbox("Filter by Position", ["All"] + positions)
+        if pos_choice != "All":
+            players = [p for p in players if p["position"] == pos_choice]
 
-        # --- Fetch Teams ---
-        @st.cache_data(ttl=3600)
-        def get_teams():
-            url = f"{API_BASE}/teams?league=1&season=2025"
-            r = make_request(url, HEADERS)
-            if not r:
-                st.error("Failed to fetch teams (network issue or invalid key).")
-                return []
-            data = r.json().get("response", [])
-            teams = [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data]
-            return sorted(teams, key=lambda x: x["name"])
+        player_names = [p["name"] for p in players]
+        player_choice = st.selectbox("Select Player", player_names)
 
-        teams = get_teams()
-        if not teams:
-            st.warning("⚠️ No team data returned. Your API plan may not include NFL access.")
-            st.stop()
+        if player_choice:
+            player = next(p for p in players if p["name"] == player_choice)
+            st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+            col1, col2 = st.columns(2)
+            col1.metric("Age", player.get("age", "N/A"))
+            col2.metric("Jersey #", player.get("number", "N/A"))
+            st.success("✅ Player lookup complete!")
 
-        # --- Team Selection ---
-        team_names = [t["name"] for t in teams]
-        team_map = {t["name"]: t["id"] for t in teams}
-        selected_team = st.selectbox("Select NFL Team", team_names)
-
-        if selected_team:
-            team_id = team_map[selected_team]
-
-            st.info(f"Loading roster for **{selected_team}**...")
-            url = f"{API_BASE}/players?team={team_id}&season=2025"
-            r = make_request(url, HEADERS)
-            if not r:
-                st.error("Failed to fetch player data.")
-                st.stop()
-
-            data = r.json().get("response", [])
-            players = [
-                {
-                    "id": p["player"]["id"],
-                    "name": p["player"]["name"],
-                    "position": p["player"].get("position"),
-                    "age": p["player"].get("age"),
-                    "number": p["player"].get("number"),
-                }
-                for p in data
-            ]
-
-            if not players:
-                st.warning("No players found for this team.")
-                st.stop()
-
-            # --- Filter by position ---
-            positions = sorted(set([p["position"] for p in players if p["position"]]))
 
     
 
