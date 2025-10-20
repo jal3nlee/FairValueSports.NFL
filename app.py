@@ -544,17 +544,34 @@ def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
     df["home_imp_vig"] = df["home_price"].apply(american_to_implied_prob)
     df["away_imp_vig"] = df["away_price"].apply(american_to_implied_prob)
 
-    # Average across all books for each event
-    agg = df.groupby(["event_id", "home_team", "away_team"]).agg(
-        home_imp_vig=("home_imp_vig", "mean"),
-        away_imp_vig=("away_imp_vig", "mean"),
-        commence_time=("commence_time", "first")
-    ).reset_index()
+    # --- Market Leaders Benchmark (FanDuel, DraftKings, bet365) ---
+bench_books = {"FanDuel", "DraftKings", "bet365"}
 
-    # Remove vig — normalize probabilities so they sum to 1
-    agg["home_fair"], agg["away_fair"] = zip(
-        *agg.apply(lambda r: devig_two_way(r["home_imp_vig"], r["away_imp_vig"]), axis=1)
-    )
+# Identify which events actually have data from the benchmark books
+df["is_benchmark"] = df["book"].isin(bench_books)
+
+def weighted_mean(series):
+    return series.mean() if not series.empty else np.nan
+
+agg = (
+    df.groupby(["event_id", "home_team", "away_team"])
+    .apply(lambda g: pd.Series({
+        "home_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "home_imp_vig"])
+                        if g["is_benchmark"].any() else weighted_mean(g["home_imp_vig"]),
+        "away_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "away_imp_vig"])
+                        if g["is_benchmark"].any() else weighted_mean(g["away_imp_vig"]),
+        "commence_time": g["commence_time"].iloc[0],
+        "num_benchmark_books": g["is_benchmark"].sum(),
+        "num_total_books": len(g)
+    }))
+    .reset_index()
+)
+
+# Remove vig (normalize probabilities to sum to 1)
+agg["home_fair"], agg["away_fair"] = zip(
+    *agg.apply(lambda r: devig_two_way(r["home_imp_vig"], r["away_imp_vig"]), axis=1)
+)
+
 
     return agg
 
