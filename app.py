@@ -1433,33 +1433,93 @@ def run_app():
                             st.dataframe(df_results, use_container_width=True)
     
     
-    # ----------------------------
-    # TAB 3 — PLAYER PROPS
-    # ----------------------------
     with tabs[3]:
-        st.title("🏈 NFL Player Props — RB Lookup")
+        st.title("NFL Player Lookup — Team & Position Search")
     
-        # --- Load API Key ---
+        # --- Load API Key & headers ---
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
         API_BASE = "https://v1.american-football.api-sports.io"
         HEADERS = {"x-apisports-key": API_SPORTS_KEY}
     
         if not API_SPORTS_KEY:
-            st.error("⚠️ Missing API_SPORTS_KEY in environment variables.")
+            st.error("Missing API_SPORTS_KEY in environment variables.")
             st.stop()
     
-        st.info("Testing API connection...")
+        # --- Test API connection (non-blocking) ---
         try:
             resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
             if resp.status_code == 200:
-                st.success("✅ Connected to API successfully!")
+                st.success("Connected to API-Sports.")
             else:
-                st.warning(f"⚠️ API returned {resp.status_code}: {resp.text[:150]}")
+                st.warning(f"API returned {resp.status_code}: {resp.text[:150]}")
         except Exception as e:
-            st.warning(f"⚠️ Connection failed: {e}")
-            st.info("Continuing in offline mode.")
+            st.warning(f"Connection failed: {e}")
+            st.info("Running in offline mode.")
     
-        st.write("✅ Player Props tab is loaded and functional.")
+        # --- Fetch team list ---
+        @st.cache_data(ttl=3600)
+        def get_teams():
+            try:
+                r = requests.get(f"{API_BASE}/teams?league=1&season=2025", headers=HEADERS, timeout=10)
+                if r.status_code != 200:
+                    return []
+                data = r.json().get("response", [])
+                return sorted(
+                    [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data],
+                    key=lambda x: x["name"]
+                )
+            except Exception:
+                return []
+    
+        teams = get_teams()
+        if not teams:
+            st.warning("Could not load NFL teams. Showing fallback list.")
+            teams = [{"id": 1, "name": "Buffalo Bills"}, {"id": 2, "name": "Kansas City Chiefs"}]
+    
+        # --- Team selection ---
+        team_names = [t["name"] for t in teams]
+        team_map = {t["name"]: t["id"] for t in teams}
+        selected_team = st.selectbox("Select NFL Team", team_names)
+    
+        # --- Position selection (default to RB for now) ---
+        position_choice = st.selectbox("Select Position", ["RB", "QB", "WR", "TE"], index=0)
+    
+        if selected_team:
+            team_id = team_map[selected_team]
+            with st.spinner(f"Fetching {selected_team} roster..."):
+                try:
+                    r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS, timeout=10)
+                    data = r.json().get("response", []) if r.status_code == 200 else []
+                except Exception as e:
+                    st.warning(f"Roster request failed: {e}")
+                    data = []
+    
+            # --- Filter players by selected position ---
+            players = []
+            for p in data:
+                player = p.get("player", {})
+                if player.get("position") == position_choice:
+                    players.append({
+                        "id": player["id"],
+                        "name": player["name"],
+                        "age": player.get("age"),
+                        "number": player.get("number"),
+                        "position": player.get("position")
+                    })
+    
+            if not players:
+                st.warning(f"No players found for position {position_choice}.")
+                players = [{"id": 0, "name": "Example Player", "age": 27, "number": 22, "position": position_choice}]
+    
+            selected_player = st.selectbox("Select Player", [p["name"] for p in players])
+            player = next(p for p in players if p["name"] == selected_player)
+    
+            st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+            st.metric("Age", player.get("age", "N/A"))
+            st.metric("Jersey #", player.get("number", "N/A"))
+    
+            st.info("Player lookup complete. (Next step: integrate prop lines.)")
+
 
 
 
