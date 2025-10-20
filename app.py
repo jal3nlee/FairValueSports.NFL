@@ -1473,116 +1473,24 @@ def run_app():
             st.markdown("### Parlay Comparison Across Sportsbooks")
             st.dataframe(df_results, use_container_width=True)
 
-
     with tabs[3]:
-        st.title("Player Props")
+        st.title("🏈 NFL Player Props — Debug Mode")
     
-        # --- Load API Key ---
-        API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-        API_BASE = "https://v1.american-football.api-sports.io"
-        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
+        st.write("✅ Player Props tab loaded successfully.")
+        st.write("If you see this message, the tab is rendering properly.")
     
-        # --- Validate Key ---
-        if not API_SPORTS_KEY:
-            st.error("⚠️ Missing API_SPORTS_KEY in environment variables.")
-            st.info("Add it in Render → Environment → API_SPORTS_KEY.")
-            st.stop()
+        # Simple debug outputs
+        st.text("This is a text line printed from inside the Player Props tab.")
+        st.markdown("**Markdown output:** Hello from the Player Props section.")
+        st.code("print('Streamlit tab is running')", language="python")
     
-        # --- Test API Connection (non-blocking) ---
-        st.info("Testing API connection...")
-        try:
-            resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
-            st.write("DEBUG: Status Code", resp.status_code)
-            if resp.status_code == 200:
-                st.success("✅ Connected to API successfully!")
-            else:
-                st.warning(f"⚠️ API returned {resp.status_code}: {resp.text[:150]}")
-        except Exception as e:
-            st.warning(f"⚠️ Connection failed: {e}")
-            st.info("Continuing in offline/debug mode.")
-            resp = None
+        # Test interaction element
+        name = st.text_input("Enter anything here to test input box:")
+        if name:
+            st.success(f"You typed: {name}")
     
-        # --- Fetch Teams (with fallback) ---
-        @st.cache_data(ttl=3600)
-        def get_teams():
-            try:
-                url = f"{API_BASE}/teams?league=1&season=2025"
-                r = requests.get(url, headers=HEADERS, timeout=10)
-                if r.status_code != 200:
-                    st.warning(f"⚠️ Failed to fetch teams ({r.status_code}).")
-                    return []
-                data = r.json().get("response", [])
-                return sorted(
-                    [{"id": t["team"]["id"], "name": t["team"]["name"]} for t in data],
-                    key=lambda x: x["name"]
-                )
-            except Exception as e:
-                st.warning(f"⚠️ Team fetch failed: {e}")
-                return []
-    
-        teams = get_teams()
-    
-        # --- If no teams, show fallback options ---
-        if not teams:
-            st.warning("⚠️ No team data returned from API. Using fallback list.")
-            teams = [
-                {"id": 1, "name": "Arizona Cardinals"},
-                {"id": 2, "name": "Buffalo Bills"},
-                {"id": 3, "name": "Dallas Cowboys"},
-            ]
-    
-        # --- Team Selection Dropdown ---
-        team_names = [t["name"] for t in teams]
-        team_map = {t["name"]: t["id"] for t in teams}
-        selected_team = st.selectbox("Select NFL Team", team_names, index=0)
-    
-        # --- Fetch Players for Selected Team ---
-        if selected_team:
-            team_id = team_map[selected_team]
-            with st.spinner(f"Loading roster for {selected_team}..."):
-                try:
-                    r = requests.get(f"{API_BASE}/players?team={team_id}&season=2025", headers=HEADERS, timeout=10)
-                except Exception as e:
-                    r = None
-                    st.warning(f"⚠️ Roster request failed: {e}")
-    
-            if not r or r.status_code != 200:
-                st.warning("⚠️ Failed to load players from API.")
-                st.info("Showing example player data (offline mode).")
-                data = [{
-                    "player": {"id": 100, "name": "Example RB", "position": "RB", "age": 27, "number": 22}
-                }]
-            else:
-                data = r.json().get("response", [])
-    
-            # --- Filter RBs ---
-            rbs = []
-            for p in data:
-                player = p.get("player", {})
-                if player.get("position") == "RB":
-                    rbs.append({
-                        "id": player["id"],
-                        "name": player["name"],
-                        "position": player.get("position"),
-                        "age": player.get("age"),
-                        "number": player.get("number"),
-                    })
-    
-            if not rbs:
-                st.warning("⚠️ No running backs found. Showing placeholder.")
-                rbs = [{"id": 0, "name": "Example RB", "position": "RB", "age": 27, "number": 22}]
-    
-            # --- RB Dropdown ---
-            rb_names = [rb["name"] for rb in rbs]
-            selected_rb = st.selectbox("Select Running Back", rb_names, index=0)
-    
-            if selected_rb:
-                rb = next(rb for rb in rbs if rb["name"] == selected_rb)
-                st.subheader(f"{rb['name']} — {rb.get('position', 'N/A')}")
-                col1, col2 = st.columns(2)
-                col1.metric("Age", rb.get("age", "N/A"))
-                col2.metric("Jersey #", rb.get("number", "N/A"))
-                st.success("✅ RB lookup complete.")    
+        st.write("End of Player Props debug section ✅")
+
 
 if __name__ == "__main__":
     run_app()
