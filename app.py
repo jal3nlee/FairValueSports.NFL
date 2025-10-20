@@ -1492,5 +1492,9 @@ def run_app():
         st.write("End of Player Props debug section ✅")
 
 
+st.write("✅ Bottom of app reached — Streamlit is still running.")
+
+
+
 if __name__ == "__main__":
     run_app()
