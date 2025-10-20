@@ -1575,6 +1575,18 @@ def run_app():
                 st.success("✅ RB lookup complete.")
 
 
+        st.write("API Key Loaded:", bool(API_SPORTS_KEY))
+        st.write("API Base:", API_BASE)
+        
+        try:
+            resp = requests.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
+            st.write("Response Code:", resp.status_code)
+            st.write("Response Text:", resp.text[:200])
+        except Exception as e:
+            st.write("Exception:", str(e))
+
+
+
     
 
 if __name__ == "__main__":
