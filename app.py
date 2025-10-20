@@ -528,12 +528,9 @@ def build_market_from_lines_total(df_lines: pd.DataFrame) -> pd.DataFrame:
 # =======================
 def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
     """
-    Compute consensus fair win probabilities (no-vig) for moneylines.
-
-    - Uses all available sportsbook lines for each event.
-    - Converts odds → implied probabilities.
-    - Averages across books.
-    - Removes vig so the two sides sum to 1.
+    Compute fair win probabilities (no-vig) using Market Leaders Benchmark:
+    FanDuel, DraftKings, and bet365. Falls back to all books if those
+    are unavailable for an event.
     """
     if df_evt_books.empty:
         return pd.DataFrame()
@@ -545,35 +542,33 @@ def compute_consensus_fair_probs_h2h(df_evt_books: pd.DataFrame):
     df["away_imp_vig"] = df["away_price"].apply(american_to_implied_prob)
 
     # --- Market Leaders Benchmark (FanDuel, DraftKings, bet365) ---
-bench_books = {"FanDuel", "DraftKings", "bet365"}
+    bench_books = {"FanDuel", "DraftKings", "bet365"}
+    df["is_benchmark"] = df["book"].isin(bench_books)
 
-# Identify which events actually have data from the benchmark books
-df["is_benchmark"] = df["book"].isin(bench_books)
+    def weighted_mean(series):
+        return series.mean() if not series.empty else np.nan
 
-def weighted_mean(series):
-    return series.mean() if not series.empty else np.nan
+    agg = (
+        df.groupby(["event_id", "home_team", "away_team"])
+        .apply(lambda g: pd.Series({
+            "home_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "home_imp_vig"])
+                            if g["is_benchmark"].any() else weighted_mean(g["home_imp_vig"]),
+            "away_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "away_imp_vig"])
+                            if g["is_benchmark"].any() else weighted_mean(g["away_imp_vig"]),
+            "commence_time": g["commence_time"].iloc[0],
+            "num_benchmark_books": g["is_benchmark"].sum(),
+            "num_total_books": len(g)
+        }))
+        .reset_index()
+    )
 
-agg = (
-    df.groupby(["event_id", "home_team", "away_team"])
-    .apply(lambda g: pd.Series({
-        "home_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "home_imp_vig"])
-                        if g["is_benchmark"].any() else weighted_mean(g["home_imp_vig"]),
-        "away_imp_vig": weighted_mean(g.loc[g["is_benchmark"], "away_imp_vig"])
-                        if g["is_benchmark"].any() else weighted_mean(g["away_imp_vig"]),
-        "commence_time": g["commence_time"].iloc[0],
-        "num_benchmark_books": g["is_benchmark"].sum(),
-        "num_total_books": len(g)
-    }))
-    .reset_index()
-)
+    # Remove vig (normalize probabilities to sum to 1)
+    agg["home_fair"], agg["away_fair"] = zip(
+        *agg.apply(lambda r: devig_two_way(r["home_imp_vig"], r["away_imp_vig"]), axis=1)
+    )
 
-# Remove vig (normalize probabilities to sum to 1)
-agg["home_fair"], agg["away_fair"] = zip(
-    *agg.apply(lambda r: devig_two_way(r["home_imp_vig"], r["away_imp_vig"]), axis=1)
-)
+    return agg
 
-
-return agg
 
 def best_prices_h2h(df_evt_books: pd.DataFrame):
     if df_evt_books.empty:
