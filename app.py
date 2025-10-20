@@ -573,7 +573,7 @@ agg["home_fair"], agg["away_fair"] = zip(
 )
 
 
-    return agg
+return agg
 
 def best_prices_h2h(df_evt_books: pd.DataFrame):
     if df_evt_books.empty:
