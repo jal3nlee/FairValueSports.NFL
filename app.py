@@ -1453,14 +1453,14 @@ def run_app():
         
         # --- Test API Connection ---
         try:
-        r = session.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            st.success("Connected to API-Sports successfully.")
-        else:
-            st.warning(f"API returned {r.status_code}: {r.text[:120]}")
+            r = session.get(f"{API_BASE}/status", headers=HEADERS, timeout=10)
+            if r.status_code == 200:
+                st.success("Connected to API-Sports successfully.")
+            else:
+                st.warning(f"API returned {r.status_code}: {r.text[:120]}")
         except Exception as e:
-        st.error(f"Connection failed: {e}")
-        st.info("Running in offline mode (example data only).")
+            st.error(f"Connection failed: {e}")
+            st.info("Running in offline mode (example data only).")
         
         # --- Fetch NFL Teams ---
         @st.cache_data(ttl=3600)
