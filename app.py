@@ -12,163 +12,68 @@ from PIL import Image
 from streamlit_cookies_manager import EncryptedCookieManager
 
 # =======================
-# Auth (Supabase)
+# AUTH — CLEAN UNIFIED VERSION
 # =======================
+
+from streamlit_cookies_manager import EncryptedCookieManager
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
+    st.error("Auth not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY to environment.")
     st.stop()
 
+# --- Create Supabase client ONCE ---
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# --- Cookie manager setup ---
+# --- Cookie manager ---
 cookies = EncryptedCookieManager(prefix="fvb_", password="your-very-strong-secret-key")
 if not cookies.ready():
     st.stop()
 
-# --- Try to restore Supabase session from cookies ---
-if "access_token" in cookies and "refresh_token" in cookies:
-    try:
-        supabase.auth.set_session(
-            access_token=cookies["access_token"],
-            refresh_token=cookies["refresh_token"]
-        )
-        st.session_state.sb_access_token = cookies["access_token"]
-        st.session_state.sb_refresh_token = cookies["refresh_token"]
-    except Exception as e:
-        st.warning(f"Session reattach failed: {e}")
-
-# --- When user logs in successfully ---
-def save_session(session, remember=False):
-    """Store Supabase session in both session_state and optionally cookies"""
-    access_token = session["access_token"]
-    refresh_token = session["refresh_token"]
-
-    # Always save to Streamlit session
-    st.session_state.sb_access_token = access_token
-    st.session_state.sb_refresh_token = refresh_token
-
-    # Save to cookies only if user checked "Remember me"
-    if remember:
-        cookies["access_token"] = access_token
-        cookies["refresh_token"] = refresh_token
-        cookies.save()
-
-# ===== BRANDING =====
-ROOT = Path(__file__).parent.resolve()
-ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
-
-def find_asset(name: str):
-    for d in ASSET_DIRS:
-        p = d / name
-        if p.is_file():
-            return p
-    return None
-
-def newest_favicon():
-    cands = []
-    for d in ASSET_DIRS:
-        if d.is_dir():
-            cands += list(d.glob("favicon*.png"))
-    if not cands:
-        return None
-    return max(cands, key=lambda p: p.stat().st_mtime)
-
-LOGO_PATH = find_asset("logo.png")
-FAVICON_PATH = newest_favicon()
-
-favicon_img = None
-if FAVICON_PATH:
-    try:
-        favicon_img = Image.open(FAVICON_PATH)
-    except Exception:
-        favicon_img = None
-
-st.set_page_config(
-    page_title="Fair Value Betting",
-    page_icon=(favicon_img if favicon_img else "🏈"),
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-HEADER_W = 560
-SIDEBAR_W = 320
-
-if LOGO_PATH:
-    st.image(str(LOGO_PATH), width=HEADER_W)
-
-# ---- Session state priming ----
-st.session_state.setdefault("sb_session", None)
+# --- Session State Defaults ---
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
-st.session_state.setdefault("show_auth", False)
+st.session_state.setdefault("sb_session", None)
 
-def _store_session(sess):
-    st.session_state.sb_session = sess
-    try:
-        st.session_state.sb_access_token = getattr(sess, "access_token", None) or sess.get("access_token")
-        st.session_state.sb_refresh_token = getattr(sess, "refresh_token", None) or sess.get("refresh_token")
-    except Exception:
-        pass
+# --- Restore session from cookies if present ---
+if (cookies.get("access_token") and cookies.get("refresh_token")
+        and not st.session_state.get("sb_access_token")):
 
-def _clear_session():
-    st.session_state.sb_session = None
-    st.session_state.sb_access_token = None
-    st.session_state.sb_refresh_token = None
-
-def _maybe_refresh_session():
-    if st.session_state.sb_session is None and st.session_state.sb_refresh_token:
-        try:
-            res = supabase.auth.refresh_session()
-            if res and getattr(res, "session", None):
-                _store_session(res.session)
-        except Exception:
-            _clear_session()
-
-_maybe_refresh_session()
-
-# =======================
-# Auth (Supabase) with "Keep me logged in"
-# =======================
-from streamlit_cookies_manager import EncryptedCookieManager
-
-# --- Supabase credentials ---
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Auth not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment.")
-    st.stop()
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-# --- Restore Supabase session from cookies if possible ---
-if "access_token" in cookies and "refresh_token" in cookies:
     try:
         supabase.auth.set_session(
-            access_token=cookies["access_token"],
-            refresh_token=cookies["refresh_token"]
+            access_token=cookies.get("access_token"),
+            refresh_token=cookies.get("refresh_token")
         )
-        st.session_state.sb_access_token = cookies["access_token"]
-        st.session_state.sb_refresh_token = cookies["refresh_token"]
+        st.session_state.sb_access_token = cookies.get("access_token")
+        st.session_state.sb_refresh_token = cookies.get("refresh_token")
     except Exception as e:
-        st.warning(f"Session reattach failed: {e}")
+        st.warning(f"Could not restore login session: {e}")
 
-# --- Helper to save sessions ---
+# --- Helper: Save session to Streamlit + Cookies ---
 def save_session(sess, remember=False):
-    """Store Supabase session in Streamlit and optionally in cookies."""
+    """Store Supabase session object."""
+    st.session_state.sb_session = sess
     st.session_state.sb_access_token = sess.access_token
     st.session_state.sb_refresh_token = sess.refresh_token
-    st.session_state.sb_session = sess
+
     if remember:
         cookies["access_token"] = sess.access_token
         cookies["refresh_token"] = sess.refresh_token
         cookies.save()
 
-# --- Determine if user is logged in ---
-authed = bool(st.session_state.get("sb_access_token") and st.session_state.get("sb_refresh_token"))
+# --- Helper: Clear everything for logout ---
+def clear_session():
+    st.session_state.sb_session = None
+    st.session_state.sb_access_token = None
+    st.session_state.sb_refresh_token = None
+    cookies.clear()
+    cookies.save()
+
+# --- Auth status flag ---
+authed = bool(st.session_state.sb_access_token and st.session_state.sb_refresh_token)
+
 
 # =======================
 # SIDEBAR UI
