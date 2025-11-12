@@ -1443,8 +1443,8 @@ def run_app():
         SEASON = 2024
         
         if not API_SPORTS_KEY:
-        st.error("Missing API_SPORTS_KEY in environment variables.")
-        st.stop()
+            st.error("Missing API_SPORTS_KEY in environment variables.")
+            st.stop()
         
         # --- Create a clean session ---
         session = requests.Session()
