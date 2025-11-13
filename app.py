@@ -1388,153 +1388,117 @@ def run_app():
                             st.markdown("### Parlay Comparison Across Sportsbooks")
                             st.dataframe(df_results, use_container_width=True)
     with tabs[3]:
-        st.title("NFL Player Lookup — Team & Position Search (Debug Mode Enabled)")
+        st.title("NFL Player Lookup — Team & Position Search")
     
-        # =========================
-        # API CONFIG
-        # =========================
+        # ===============================
+        # API CONFIG (FINAL + CORRECT)
+        # ===============================
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-        API_BASE = "https://v1.american-football.api-sports.io"
-        LEAGUE_ID = 12
-        SEASON = 2024   # we can change later if needed
+        API_BASE = "https://v1.football.api-sports.io"   # FIXED ENDPOINT
+        LEAGUE_ID = 132                                   # FIXED NFL LEAGUE ID
+        SEASON = 2024                                     # Works with your Pro plan
     
         if not API_SPORTS_KEY:
             st.error("Missing API_SPORTS_KEY in environment variables.")
             st.stop()
     
-        # -------------------------
-        # Create Session
-        # -------------------------
+        # Create clean session
         session = requests.Session()
         session.headers.clear()
     
-        # CORRECT headers for this API (NOT apisports-key)
         HEADERS = {
             "x-rapidapi-key": API_SPORTS_KEY,
-            "x-rapidapi-host": "v1.american-football.api-sports.io"
+            "x-rapidapi-host": "v1.football.api-sports.io"   # FIXED HOST
         }
     
-        # =========================
-        # Debug Helper
-        # =========================
-        def debug_request(label, url):
-            st.write(f"### 🔍 DEBUG: {label}")
-            st.write(f"URL: `{url}`")
-            try:
-                r = session.get(url, headers=HEADERS, timeout=10)
-                st.write("Status Code:", r.status_code)
-                st.write("Headers:", r.headers)
-                st.write("Raw JSON:", r.text[:600])  # first 600 chars
-                return r
-            except Exception as e:
-                st.error(f"Request failed: {e}")
-                return None
-    
-        # =========================
-        # Test API Connection
-        # =========================
-        st.subheader("API Connection Test")
-        debug_request("API Status", f"{API_BASE}/status")
-    
-        # =========================
-        # Fetch Teams (with caching)
-        # =========================
+        # ===============================
+        # FETCH TEAMS (CACHED)
+        # ===============================
         @st.cache_data(ttl=3600)
-        def get_nfl_teams_debug():
+        def get_nfl_teams():
             url = f"{API_BASE}/teams?league={LEAGUE_ID}&season={SEASON}"
-            r = debug_request("Fetching Teams", url)
+            r = session.get(url, headers=HEADERS, timeout=10)
     
-            if r is None or r.status_code != 200:
-                st.warning("⚠ Could not fetch teams. Returning empty list.")
+            if r.status_code != 200:
+                st.warning(f"Failed to load teams (status {r.status_code})")
+                st.text(r.text)
                 return []
     
             data = r.json().get("response", [])
             teams = [
                 {"id": t["team"]["id"], "name": t["team"]["name"]}
                 for t in data
-                if t.get("team") and t["team"].get("name")
             ]
-    
             return sorted(teams, key=lambda x: x["name"])
     
         # Load teams
-        st.subheader("Loading NFL Teams")
-        teams = get_nfl_teams_debug()
+        teams = get_nfl_teams()
     
         if not teams:
-            st.error("❌ No teams returned from API. Check debug info above.")
-            teams = [
-                {"id": 1, "name": "Buffalo Bills"},
-                {"id": 2, "name": "Kansas City Chiefs"},
-                {"id": 3, "name": "San Francisco 49ers"},
-            ]
+            st.error("Could not load NFL teams. Please verify API access.")
+            st.stop()
     
-        # Team dropdown
+        # ===============================
+        # TEAM + POSITION SELECTORS
+        # ===============================
         team_names = [t["name"] for t in teams]
         team_map = {t["name"]: t["id"] for t in teams}
     
         selected_team = st.selectbox("Select NFL Team", team_names)
-    
-        # Position dropdown
         position_choice = st.selectbox("Select Position", ["QB", "RB", "WR", "TE"], index=0)
     
-        # =========================
-        # Fetch Roster for Team
-        # =========================
+        # ===============================
+        # FETCH ROSTER FOR SELECTED TEAM
+        # ===============================
         data = []
-    
         if selected_team:
             team_id = team_map[selected_team]
-    
-            st.subheader(f"Fetching Players for {selected_team}")
             url = f"{API_BASE}/players?team={team_id}&league={LEAGUE_ID}&season={SEASON}"
     
-            r = debug_request("Fetching Team Roster", url)
+            r = session.get(url, headers=HEADERS, timeout=10)
     
-            if r and r.status_code == 200:
-                data = r.json().get("response", [])
+            if r.status_code != 200:
+                st.warning(f"Roster request failed: {r.status_code}")
+                st.text(r.text)
             else:
-                st.warning("Roster fetch failed — see debug output above.")
-                data = []
+                data = r.json().get("response", [])
     
-        # =========================
-        # Filter Players
-        # =========================
+        # ===============================
+        # FILTER PLAYERS BY POSITION
+        # ===============================
         players = []
         for p in data:
-            player_info = p.get("player", {})
-            if player_info.get("position") == position_choice:
+            info = p.get("player", {})
+            if info.get("position") == position_choice:
                 players.append({
-                    "id": player_info.get("id"),
-                    "name": player_info.get("name"),
-                    "position": player_info.get("position"),
-                    "age": player_info.get("age"),
-                    "number": player_info.get("number"),
+                    "id": info.get("id"),
+                    "name": info.get("name"),
+                    "position": info.get("position"),
+                    "age": info.get("age"),
+                    "number": info.get("number"),
                 })
     
         if not players:
-            st.warning(f"No players found for {position_choice} — showing placeholder.")
-            players = [{
-                "id": 0,
-                "name": f"Example {position_choice}",
-                "position": position_choice,
-                "age": 99,
-                "number": "-",
-            }]
+            st.warning("No players found for this position on this team.")
+            st.stop()
     
-        # =========================
-        # Player Selection
-        # =========================
+        # ===============================
+        # PLAYER SELECTOR
+        # ===============================
         selected_player = st.selectbox("Select Player", [p["name"] for p in players])
         player = next(p for p in players if p["name"] == selected_player)
     
-        # Display player info
-        st.subheader(f"{player['name']} — {player.get('position', 'N/A')}")
+        # ===============================
+        # DISPLAY PLAYER INFO
+        # ===============================
+        st.subheader(f"{player['name']} — {player['position']}")
+    
         col1, col2 = st.columns(2)
         col1.metric("Age", player.get("age", "N/A"))
         col2.metric("Jersey #", player.get("number", "N/A"))
     
-        st.info("Debug mode is active — once we confirm this works, I will clean it to production style.")
+        st.success("Player lookup loaded successfully. Props integration coming next!")
+
 
 
 
