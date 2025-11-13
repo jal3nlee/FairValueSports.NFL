@@ -3,14 +3,14 @@ import requests
 
 MAILERSEND_API_KEY = os.getenv("MAILERSEND_API_KEY")
 
-def send_email(to_email, subject, html_content):
+def send_template_email(to_email, template_id, variables=None):
     url = "https://api.mailersend.com/v1/email"
 
     payload = {
         "from": {"email": "youraddress@fairvaluebetting.com"},
         "to": [{"email": to_email}],
-        "subject": subject,
-        "html": html_content
+        "template_id": template_id,
+        "variables": variables or []
     }
 
     headers = {
@@ -20,29 +20,47 @@ def send_email(to_email, subject, html_content):
 
     r = requests.post(url, json=payload, headers=headers)
 
-    if r.status_code >= 200 and r.status_code < 300:
-        print(f"✔ Sent to {to_email}")
+    if 200 <= r.status_code < 300:
+        print(f"✔ Template sent to {to_email}")
     else:
-        print(f"✘ Failed to send to {to_email}: {r.status_code} | {r.text}")
+        print(f"✘ Failed for {to_email}: {r.status_code} | {r.text}")
 
 
 if __name__ == "__main__":
-    # ---- MANUALLY LIST YOUR EMAILS HERE ----
+    # ----------------------------------------
+    # 🔥 ENTER YOUR EMAILS HERE
+    # ----------------------------------------
     emails = [
-        "friend1@gmail.com",
-        "friend2@yahoo.com",
-        "friend3@outlook.com",
+        "jalenlee04@gmail.com",
+    ]
+    # ----------------------------------------
+
+    # 🔥 Your MailerSend template ID
+    TEMPLATE_ID = "z3m5jgryx604dpyo"
+
+    # Optional dynamic variables used inside MailerSend templates
+    # These match {{name}} and {{custom_message}} in your template
+    template_variables = [
+        {
+            "email": e,
+            "substitutions": [
+                {"var": "name", "value": e.split("@")[0].title()},
+                {"var": "custom_message", "value": "Welcome to Fair Value Betting!"}
+            ]
+        }
+        for e in emails
     ]
 
-    subject = "Fair Value Betting Update"
-    html_content = """
-    <h1>Hello!</h1>
-    <p>This is a manual update from Fair Value Betting.</p>
-    """
+    print("Sending template emails...\n")
 
-    print("Sending bulk email...\n")
-
-    for e in emails:
-        send_email(e, subject, html_content)
+    for entry in template_variables:
+        send_template_email(
+            entry["email"],
+            TEMPLATE_ID,
+            variables=[{
+                "email": entry["email"],
+                "substitutions": entry["substitutions"]
+            }]
+        )
 
     print("\nDone.")
