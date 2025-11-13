@@ -74,6 +74,43 @@ def clear_session():
 # --- Auth status flag ---
 authed = bool(st.session_state.sb_access_token and st.session_state.sb_refresh_token)
 
+# ===== BRANDING =====
+ROOT = Path(__file__).parent.resolve()
+ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
+
+def find_asset(name: str):
+    for d in ASSET_DIRS:
+        p = d / name
+        if p.is_file():
+            return p
+    return None
+
+def newest_favicon():
+    cands = []
+    for d in ASSET_DIRS:
+        if d.is_dir():
+            cands += list(d.glob("favicon*.png"))
+    if not cands:
+        return None
+    return max(cands, key=lambda p: p.stat().st_mtime)
+
+LOGO_PATH = find_asset("logo.png")
+FAVICON_PATH = newest_favicon()
+
+favicon_img = None
+if FAVICON_PATH:
+    try:
+        favicon_img = Image.open(FAVICON_PATH)
+    except Exception:
+        favicon_img = None
+
+st.set_page_config(
+    page_title="Fair Value Betting",
+    page_icon=(favicon_img if favicon_img else "🏈"),
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 
 # =======================
 # SIDEBAR UI
