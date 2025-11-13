@@ -79,6 +79,7 @@ ROOT = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
 
 def find_asset(name: str):
+    """Search all asset directories for a file."""
     for d in ASSET_DIRS:
         p = d / name
         if p.is_file():
@@ -86,6 +87,7 @@ def find_asset(name: str):
     return None
 
 def newest_favicon():
+    """Find the most recently modified favicon*.png file."""
     cands = []
     for d in ASSET_DIRS:
         if d.is_dir():
@@ -94,9 +96,11 @@ def newest_favicon():
         return None
     return max(cands, key=lambda p: p.stat().st_mtime)
 
+# Locate logo + favicon
 LOGO_PATH = find_asset("logo.png")
 FAVICON_PATH = newest_favicon()
 
+# Load favicon image (optional)
 favicon_img = None
 if FAVICON_PATH:
     try:
@@ -104,6 +108,7 @@ if FAVICON_PATH:
     except Exception:
         favicon_img = None
 
+# Configure Streamlit page
 st.set_page_config(
     page_title="Fair Value Betting",
     page_icon=(favicon_img if favicon_img else "🏈"),
@@ -111,11 +116,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Layout constants (MUST be defined before sidebar)
+HEADER_W = 560
+SIDEBAR_W = 320
 
 # =======================
 # SIDEBAR UI
 # =======================
 with st.sidebar:
+
     # --- Logo or Title ---
     if LOGO_PATH:
         st.image(str(LOGO_PATH), width=SIDEBAR_W)
@@ -132,18 +141,23 @@ with st.sidebar:
             if user and getattr(user, "user", None)
             else None
         )
+
         st.success(f"Signed in{f' as {user_email}' if user_email else ''}.")
+
         col1, col2 = st.columns(2)
+
         with col1:
             if st.button("Log out", use_container_width=True):
                 try:
                     supabase.auth.sign_out()
                 except Exception:
                     pass
+
                 st.session_state.clear()
                 cookies.clear()
                 cookies.save()
                 st.rerun()
+
 
     # --- If not logged in ---
     else:
