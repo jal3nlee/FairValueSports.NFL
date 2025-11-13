@@ -1389,21 +1389,25 @@ def run_app():
                             st.dataframe(df_results, use_container_width=True)
 
     with tabs[3]:
-        st.title("NFL Player Lookup — Stats by Name")
+        st.title("NFL Player Lookup — Team, Player & Stats Search")
     
+        # --- Load API Key ---
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
         API_BASE = "https://v1.american-football.api-sports.io"
-        SEASON = 2025  # or dynamic if you want: datetime.now().year
     
         if not API_SPORTS_KEY:
-            st.error("Missing API_SPORTS_KEY.")
+            st.error("Missing API_SPORTS_KEY in environment variables.")
             st.stop()
     
-        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
-        session = requests.Session()
-        session.headers.clear()
+        # --- RapidAPI Header Style (WORKS with API-Sports key) ---
+        HEADERS = {
+            "x-rapidapi-key": API_SPORTS_KEY,
+            "x-rapidapi-host": "v1.american-football.api-sports.io"
+        }
     
-        # -------- TEAMS (Static List) -------- #
+        # ---------------------------------------
+        # TEAM LIST (STATIC MAPPING — BEST WAY)
+        # ---------------------------------------
         NFL_TEAMS = [
             {"id": 1, "name": "Las Vegas Raiders"},
             {"id": 2, "name": "Jacksonville Jaguars"},
@@ -1439,83 +1443,129 @@ def run_app():
             {"id": 32, "name": "Minnesota Vikings"},
         ]
     
-        # -------- TEAM PICKER -------- #
         team_names = [t["name"] for t in NFL_TEAMS]
-        team_lookup = {t["name"]: t["id"] for t in NFL_TEAMS}
+        team_map = {t["name"]: t["id"] for t in NFL_TEAMS}
+    
         selected_team = st.selectbox("Select NFL Team", team_names)
+        team_id = team_map[selected_team]
     
-        # -------- PLAYER NAME INPUT -------- #
-        player_name = st.text_input("Enter Player Name (example: baker mayfield)").strip()
+        # ------------------------------
+        # PLAYER NAME SEARCH INPUT
+        # ------------------------------
+        player_name = st.text_input(
+            "Enter Player Name (e.g., Baker Mayfield, Stefon Diggs, Bijan Robinson)",
+            ""
+        )
     
-        if selected_team and player_name:
-            tid = team_lookup[selected_team]
+        if player_name.strip() == "":
+            st.info("Enter a player name to continue.")
+            st.stop()
     
-            # -------- STEP 1 — SEARCH PLAYER (get player ID) -------- #
-            search_url = (
-                f"{API_BASE}/players?name={player_name}&team={tid}&season={SEASON}"
-            )
+        # ------------------------------
+        # STEP 1 — SEARCH PLAYER
+        # ------------------------------
+        with st.spinner("Searching for player..."):
+            search_url = f"{API_BASE}/players"
+            params = {
+                "name": player_name,
+                "team": team_id,
+            }
     
-            with st.spinner(f"Searching for '{player_name}'..."):
-                r = session.get(search_url, headers=HEADERS, timeout=10)
+            r = requests.get(search_url, headers=HEADERS, params=params)
     
-            data = r.json().get("response", [])
-    
-            # No player found
-            if not data:
-                st.error("No players found for that name on this team.")
+            if r.status_code != 200:
+                st.error(f"Player search failed: {r.status_code}")
                 st.stop()
     
-            # Found a player
-            player = data[0]["player"]
-            player_id = player["id"]
+            resp = r.json().get("response", [])
     
-            st.success(f"Found player: **{player['name']}** (ID: {player_id})")
-    
-            # --- Basic Info Display ---
-            st.subheader("Player Info")
-            c1, c2 = st.columns(2)
-            c1.metric("Name", player["name"])
-            c2.metric("Position", player.get("position", "N/A"))
-    
-            # -------- STEP 2 — FETCH PLAYER STATS -------- #
-            stats_url = (
-                f"{API_BASE}/players/statistics?id={player_id}&team={tid}&season={SEASON}"
-            )
-    
-            with st.spinner("Loading player statistics..."):
-                s = session.get(stats_url, headers=HEADERS, timeout=10)
-    
-            stats_raw = s.json().get("response", [])
-    
-            if not stats_raw:
-                st.warning("No statistics available for this player.")
+            if not resp:
+                st.warning("No players found with that name on this team.")
                 st.stop()
     
-            stats = stats_raw[0]["statistics"][0]  # main stats block
+            # SAFE FIX FOR YOUR ERROR
+            player_block = resp[0]
+            if "player" not in player_block:
+                st.error("Unexpected API response. Missing 'player' field.")
+                st.json(resp)
+                st.stop()
     
-            st.subheader("Season Stats")
+            player = player_block["player"]
+            player_id = player.get("id")
     
-            # Example fields (different for QB/RB/WR/TE)
-            if stats.get("games"):
-                st.write("### Games")
-                st.json(stats["games"])
+        # Player Info
+        st.subheader(f"Player Found: {player.get('name')}")
+        st.image(player.get("photo") or player.get("image"), width=150)
     
-            if stats.get("passing"):
-                st.write("### Passing")
-                st.json(stats["passing"])
+        # ------------------------------
+        # STEP 2 — FETCH PLAYER SEASON STATS
+        # ------------------------------
+        st.markdown("---")
+        st.subheader("Season Statistics")
     
-            if stats.get("rushing"):
-                st.write("### Rushing")
-                st.json(stats["rushing"])
+        stats_url = f"{API_BASE}/players/statistics"
+        params = {
+            "id": player_id,
+            "team": team_id,
+            "season": 2025
+        }
     
-            if stats.get("receiving"):
-                st.write("### Receiving")
-                st.json(stats["receiving"])
+        with st.spinner("Fetching player statistics..."):
+            r2 = requests.get(stats_url, headers=HEADERS, params=params)
     
-            if stats.get("touchdowns"):
-                st.write("### Touchdowns")
-                st.json(stats["touchdowns"])
-
+        if r2.status_code != 200:
+            st.error(f"Statistics fetch failed: {r2.status_code}")
+            st.stop()
+    
+        stats_data = r2.json().get("response", [])
+        if not stats_data:
+            st.warning("No statistics available for this player this season.")
+            st.stop()
+    
+        stat_block = stats_data[0]
+    
+        # --- Display Raw Groups Cleanly ---
+        if "teams" not in stat_block or not stat_block["teams"]:
+            st.warning("No team statistics in response.")
+            st.json(stat_block)
+            st.stop()
+    
+        groups = stat_block["teams"][0].get("groups", [])
+    
+        for g in groups:
+            group_name = g.get("name")
+            stats_list = g.get("statistics", [])
+    
+            st.markdown(f"### {group_name}")
+    
+            clean_dict = {item["name"]: item["value"] for item in stats_list}
+            df = pd.DataFrame(list(clean_dict.items()), columns=["Stat", "Value"])
+            st.dataframe(df, use_container_width=True)
+    
+        # ------------------------------
+        # STEP 3 — TEAM SEASON STATISTICS
+        # ------------------------------
+        st.markdown("---")
+        st.subheader(f"{selected_team} — Season Team Statistics")
+    
+        team_stat_url = f"{API_BASE}/teams/statistics"
+        params = {
+            "team": team_id,
+            "season": 2025,
+            "league": 12
+        }
+    
+        with st.spinner("Fetching team season statistics..."):
+            t = requests.get(team_stat_url, headers=HEADERS, params=params)
+    
+        if t.status_code != 200:
+            st.error(f"Team statistics fetch failed: {t.status_code}")
+            st.stop()
+    
+        team_stats = t.json()
+        st.json(team_stats)  # TEMP — you can format later
+    
+        st.success("Player + Team stats loaded successfully.")
 
 
 
