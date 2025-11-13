@@ -1368,14 +1368,14 @@ def run_app():
 
         # --- Fetch NFL Teams ---
         @st.cache_data(ttl=3600)
-        def get_nfl_teams(session, headers):
+        def get_nfl_teams():
+            url = f"{API_BASE}/teams?league={LEAGUE_ID}&season={SEASON}"
             try:
-                url = f"{API_BASE}/teams?league={LEAGUE_ID}&season={SEASON}"
-                r = session.get(url, headers=headers, timeout=10)
+                r = session.get(url, headers=HEADERS, timeout=10)
                 if r.status_code != 200:
                     st.warning(f"Teams request failed: {r.status_code}")
                     return []
-
+        
                 data = r.json().get("response", [])
                 teams = [
                     {"id": t["team"]["id"], "name": t["team"]["name"]}
@@ -1383,10 +1383,11 @@ def run_app():
                     if t.get("team") and t["team"].get("name")
                 ]
                 return sorted(teams, key=lambda x: x["name"])
-
+        
             except Exception as e:
                 st.warning(f"Team fetch error: {e}")
                 return []
+
 
         # --- Load teams ---
         teams = get_nfl_teams(session, HEADERS)
