@@ -1417,9 +1417,9 @@ def run_app():
             st.error(f"Connection failed: {e}")
             st.info("Running in offline mode (example data only).")
 
-        # --- Fetch NFL Teams ---
         @st.cache_data(ttl=3600)
         def get_nfl_teams():
+            """Fetch NFL teams with caching, using global session + headers."""
             url = f"{API_BASE}/teams?league={LEAGUE_ID}&season={SEASON}"
             try:
                 r = session.get(url, headers=HEADERS, timeout=10)
@@ -1439,9 +1439,8 @@ def run_app():
                 st.warning(f"Team fetch error: {e}")
                 return []
 
-
         # --- Load teams ---
-        teams = get_nfl_teams(session, HEADERS)
+        teams = get_nfl_teams()
 
         if not teams:
             st.warning("Could not load NFL teams. Showing fallback list.")
