@@ -1387,29 +1387,30 @@ def run_app():
                             df_results = pd.DataFrame(sportsbook_results).sort_values("Payout ($)", ascending=False)
                             st.markdown("### Parlay Comparison Across Sportsbooks")
                             st.dataframe(df_results, use_container_width=True)
+
     with tabs[3]:
         st.title("NFL Player Lookup — Team & Position Search")
     
         # ===============================
-        # API CONFIG (FINAL + CORRECT)
+        # API CONFIG (DIRECT API-SPORTS)
         # ===============================
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
-        API_BASE = "https://v1.football.api-sports.io"   # FIXED ENDPOINT
-        LEAGUE_ID = 132                                   # FIXED NFL LEAGUE ID
-        SEASON = 2024                                     # Works with your Pro plan
+        API_BASE = "https://v1.american-football.api-sports.io"
+        LEAGUE_ID = 12
+        SEASON = 2024   # Will only work if your plan includes 2024
     
         if not API_SPORTS_KEY:
             st.error("Missing API_SPORTS_KEY in environment variables.")
             st.stop()
     
-        # Create clean session
+        # Direct API-Sports header (NOT RapidAPI)
+        HEADERS = {
+            "x-apisports-key": API_SPORTS_KEY
+        }
+    
+        # Create a clean session for requests
         session = requests.Session()
         session.headers.clear()
-    
-        HEADERS = {
-            "x-rapidapi-key": API_SPORTS_KEY,
-            "x-rapidapi-host": "v1.football.api-sports.io"   # FIXED HOST
-        }
     
         # ===============================
         # FETCH TEAMS (CACHED)
@@ -1420,11 +1421,18 @@ def run_app():
             r = session.get(url, headers=HEADERS, timeout=10)
     
             if r.status_code != 200:
-                st.warning(f"Failed to load teams (status {r.status_code})")
+                st.warning(f"Failed to load teams (Status {r.status_code})")
                 st.text(r.text)
                 return []
     
-            data = r.json().get("response", [])
+            payload = r.json()
+            data = payload.get("response", [])
+    
+            # If season is locked behind plan, show the API's real message:
+            if payload.get("errors"):
+                st.warning(payload["errors"])
+                return []
+    
             teams = [
                 {"id": t["team"]["id"], "name": t["team"]["name"]}
                 for t in data
@@ -1435,7 +1443,7 @@ def run_app():
         teams = get_nfl_teams()
     
         if not teams:
-            st.error("Could not load NFL teams. Please verify API access.")
+            st.error("Could not load NFL teams. Season may not be included in your API plan.")
             st.stop()
     
         # ===============================
@@ -1461,7 +1469,12 @@ def run_app():
                 st.warning(f"Roster request failed: {r.status_code}")
                 st.text(r.text)
             else:
-                data = r.json().get("response", [])
+                payload = r.json()
+    
+                if payload.get("errors"):
+                    st.warning(payload["errors"])
+    
+                data = payload.get("response", [])
     
         # ===============================
         # FILTER PLAYERS BY POSITION
@@ -1498,9 +1511,6 @@ def run_app():
         col2.metric("Jersey #", player.get("number", "N/A"))
     
         st.success("Player lookup loaded successfully. Props integration coming next!")
-
-
-
 
 
 
