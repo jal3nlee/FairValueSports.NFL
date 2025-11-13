@@ -1389,128 +1389,133 @@ def run_app():
                             st.dataframe(df_results, use_container_width=True)
 
     with tabs[3]:
-        st.title("NFL Player Lookup — Team & Position Search")
+        st.title("NFL Player Lookup — Stats by Name")
     
-        # ===============================
-        # API CONFIG (DIRECT API-SPORTS)
-        # ===============================
         API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
         API_BASE = "https://v1.american-football.api-sports.io"
-        LEAGUE_ID = 12
-        SEASON = 2024   # Will only work if your plan includes 2024
+        SEASON = 2025  # or dynamic if you want: datetime.now().year
     
         if not API_SPORTS_KEY:
-            st.error("Missing API_SPORTS_KEY in environment variables.")
+            st.error("Missing API_SPORTS_KEY.")
             st.stop()
     
-        # Direct API-Sports header (NOT RapidAPI)
-        HEADERS = {
-            "x-apisports-key": API_SPORTS_KEY
-        }
-    
-        # Create a clean session for requests
+        HEADERS = {"x-apisports-key": API_SPORTS_KEY}
         session = requests.Session()
         session.headers.clear()
     
-        # ===============================
-        # FETCH TEAMS (CACHED)
-        # ===============================
-        @st.cache_data(ttl=3600)
-        def get_nfl_teams():
-            url = f"{API_BASE}/teams?league={LEAGUE_ID}&season={SEASON}"
-            r = session.get(url, headers=HEADERS, timeout=10)
+        # -------- TEAMS (Static List) -------- #
+        NFL_TEAMS = [
+            {"id": 1, "name": "Las Vegas Raiders"},
+            {"id": 2, "name": "Jacksonville Jaguars"},
+            {"id": 3, "name": "New England Patriots"},
+            {"id": 4, "name": "New York Giants"},
+            {"id": 5, "name": "Baltimore Ravens"},
+            {"id": 6, "name": "Tennessee Titans"},
+            {"id": 7, "name": "Detroit Lions"},
+            {"id": 8, "name": "Atlanta Falcons"},
+            {"id": 9, "name": "Cleveland Browns"},
+            {"id": 10, "name": "Cincinnati Bengals"},
+            {"id": 11, "name": "Arizona Cardinals"},
+            {"id": 12, "name": "Philadelphia Eagles"},
+            {"id": 13, "name": "New York Jets"},
+            {"id": 14, "name": "San Francisco 49ers"},
+            {"id": 15, "name": "Green Bay Packers"},
+            {"id": 16, "name": "Chicago Bears"},
+            {"id": 17, "name": "Kansas City Chiefs"},
+            {"id": 18, "name": "Washington Commanders"},
+            {"id": 19, "name": "Carolina Panthers"},
+            {"id": 20, "name": "Buffalo Bills"},
+            {"id": 21, "name": "Indianapolis Colts"},
+            {"id": 22, "name": "Pittsburgh Steelers"},
+            {"id": 23, "name": "Seattle Seahawks"},
+            {"id": 24, "name": "Tampa Bay Buccaneers"},
+            {"id": 25, "name": "Miami Dolphins"},
+            {"id": 26, "name": "Houston Texans"},
+            {"id": 27, "name": "New Orleans Saints"},
+            {"id": 28, "name": "Denver Broncos"},
+            {"id": 29, "name": "Dallas Cowboys"},
+            {"id": 30, "name": "Los Angeles Chargers"},
+            {"id": 31, "name": "Los Angeles Rams"},
+            {"id": 32, "name": "Minnesota Vikings"},
+        ]
     
-            if r.status_code != 200:
-                st.warning(f"Failed to load teams (Status {r.status_code})")
-                st.text(r.text)
-                return []
-    
-            payload = r.json()
-            data = payload.get("response", [])
-    
-            # If season is locked behind plan, show the API's real message:
-            if payload.get("errors"):
-                st.warning(payload["errors"])
-                return []
-    
-            teams = [
-                {"id": t["team"]["id"], "name": t["team"]["name"]}
-                for t in data
-            ]
-            return sorted(teams, key=lambda x: x["name"])
-    
-        # Load teams
-        teams = get_nfl_teams()
-    
-        if not teams:
-            st.error("Could not load NFL teams. Season may not be included in your API plan.")
-            st.stop()
-    
-        # ===============================
-        # TEAM + POSITION SELECTORS
-        # ===============================
-        team_names = [t["name"] for t in teams]
-        team_map = {t["name"]: t["id"] for t in teams}
-    
+        # -------- TEAM PICKER -------- #
+        team_names = [t["name"] for t in NFL_TEAMS]
+        team_lookup = {t["name"]: t["id"] for t in NFL_TEAMS}
         selected_team = st.selectbox("Select NFL Team", team_names)
-        position_choice = st.selectbox("Select Position", ["QB", "RB", "WR", "TE"], index=0)
     
-        # ===============================
-        # FETCH ROSTER FOR SELECTED TEAM
-        # ===============================
-        data = []
-        if selected_team:
-            team_id = team_map[selected_team]
-            url = f"{API_BASE}/players?team={team_id}&league={LEAGUE_ID}&season={SEASON}"
+        # -------- PLAYER NAME INPUT -------- #
+        player_name = st.text_input("Enter Player Name (example: baker mayfield)").strip()
     
-            r = session.get(url, headers=HEADERS, timeout=10)
+        if selected_team and player_name:
+            tid = team_lookup[selected_team]
     
-            if r.status_code != 200:
-                st.warning(f"Roster request failed: {r.status_code}")
-                st.text(r.text)
-            else:
-                payload = r.json()
+            # -------- STEP 1 — SEARCH PLAYER (get player ID) -------- #
+            search_url = (
+                f"{API_BASE}/players?name={player_name}&team={tid}&season={SEASON}"
+            )
     
-                if payload.get("errors"):
-                    st.warning(payload["errors"])
+            with st.spinner(f"Searching for '{player_name}'..."):
+                r = session.get(search_url, headers=HEADERS, timeout=10)
     
-                data = payload.get("response", [])
+            data = r.json().get("response", [])
     
-        # ===============================
-        # FILTER PLAYERS BY POSITION
-        # ===============================
-        players = []
-        for p in data:
-            info = p.get("player", {})
-            if info.get("position") == position_choice:
-                players.append({
-                    "id": info.get("id"),
-                    "name": info.get("name"),
-                    "position": info.get("position"),
-                    "age": info.get("age"),
-                    "number": info.get("number"),
-                })
+            # No player found
+            if not data:
+                st.error("No players found for that name on this team.")
+                st.stop()
     
-        if not players:
-            st.warning("No players found for this position on this team.")
-            st.stop()
+            # Found a player
+            player = data[0]["player"]
+            player_id = player["id"]
     
-        # ===============================
-        # PLAYER SELECTOR
-        # ===============================
-        selected_player = st.selectbox("Select Player", [p["name"] for p in players])
-        player = next(p for p in players if p["name"] == selected_player)
+            st.success(f"Found player: **{player['name']}** (ID: {player_id})")
     
-        # ===============================
-        # DISPLAY PLAYER INFO
-        # ===============================
-        st.subheader(f"{player['name']} — {player['position']}")
+            # --- Basic Info Display ---
+            st.subheader("Player Info")
+            c1, c2 = st.columns(2)
+            c1.metric("Name", player["name"])
+            c2.metric("Position", player.get("position", "N/A"))
     
-        col1, col2 = st.columns(2)
-        col1.metric("Age", player.get("age", "N/A"))
-        col2.metric("Jersey #", player.get("number", "N/A"))
+            # -------- STEP 2 — FETCH PLAYER STATS -------- #
+            stats_url = (
+                f"{API_BASE}/players/statistics?id={player_id}&team={tid}&season={SEASON}"
+            )
     
-        st.success("Player lookup loaded successfully. Props integration coming next!")
+            with st.spinner("Loading player statistics..."):
+                s = session.get(stats_url, headers=HEADERS, timeout=10)
+    
+            stats_raw = s.json().get("response", [])
+    
+            if not stats_raw:
+                st.warning("No statistics available for this player.")
+                st.stop()
+    
+            stats = stats_raw[0]["statistics"][0]  # main stats block
+    
+            st.subheader("Season Stats")
+    
+            # Example fields (different for QB/RB/WR/TE)
+            if stats.get("games"):
+                st.write("### Games")
+                st.json(stats["games"])
+    
+            if stats.get("passing"):
+                st.write("### Passing")
+                st.json(stats["passing"])
+    
+            if stats.get("rushing"):
+                st.write("### Rushing")
+                st.json(stats["rushing"])
+    
+            if stats.get("receiving"):
+                st.write("### Receiving")
+                st.json(stats["receiving"])
+    
+            if stats.get("touchdowns"):
+                st.write("### Touchdowns")
+                st.json(stats["touchdowns"])
+
 
 
 
