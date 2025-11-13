@@ -23,7 +23,7 @@ def send_email(to_email, subject, html_content):
     if r.status_code >= 200 and r.status_code < 300:
         print(f"✔ Sent to {to_email}")
     else:
-        print(f"✘ Failed to send to {to_email}: {r.text}")
+        print(f"✘ Failed to send to {to_email}: {r.status_code} | {r.text}")
 
 
 if __name__ == "__main__":
