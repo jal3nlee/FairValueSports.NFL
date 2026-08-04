@@ -15,6 +15,7 @@ from core.odds_math import (
     kelly_fraction,
     fmt_date_et_str,
     fmt_odds,
+    fmt_ev,
 )
 
 logger = logging.getLogger(__name__)
