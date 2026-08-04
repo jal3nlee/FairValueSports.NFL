@@ -3,21 +3,10 @@ import pandas as pd
 import streamlit as st
 
 from core.odds_math import (
-    american_to_decimal,
-    american_to_implied_prob,
-    expected_value_pct,
-    fmt_odds,
-    fmt_ev,
+    american_to_decimal, american_to_implied_prob, expected_value_pct, fmt_odds, fmt_ev,
 )
 from core.pipeline import MARKETS, run_market_pipeline, PipelineTrace
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window
-
-TIPS = {
-    "ev":         "Expected Value — your edge vs. the fair price. Positive = favorable bet.",
-    "fair_win":   "Consensus fair probability — the no-vig estimate of this outcome's true likelihood.",
-    "fair_odds":  "Fair Value odds — the American odds equivalent of the consensus fair probability.",
-    "best_odds":  "Best available odds — the highest American odds found across all sportsbooks.",
-}
 
 
 def _sc_name(book: str) -> str:
@@ -31,6 +20,14 @@ def _sc_name(book: str) -> str:
         "mybookie": "MyBookie", "betus": "BetUS", "underdog": "Underdog", "prophetx": "ProphetX",
     }
     return _display.get(str(book).lower(), str(book).replace("_", " ").title())
+
+
+TIPS = {
+    "ev":         "Expected Value — your edge vs. the fair price. Positive = favorable bet.",
+    "fair_win":   "Consensus fair probability — the no-vig estimate of this outcome's true likelihood.",
+    "fair_odds":  "Fair Value odds — the American odds equivalent of the consensus fair probability.",
+    "best_odds":  "Best available odds — the highest American odds found across all sportsbooks.",
+}
 
 
 def _odds_value_in_format(american_price, fmt: str):
@@ -114,6 +111,24 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         if any(not df.empty for df in all_display.values())
         else pd.DataFrame()
     )
+
+    if debug_mode:
+        for _mkt_key, _trace in all_traces.items():
+            st.caption(
+                f"debug [{_mkt_key}]: raw={_trace.raw} after_window={_trace.after_window} "
+                f"after_build={_trace.after_build} after_consensus={_trace.after_consensus} "
+                f"after_best={_trace.after_best} after_merge={_trace.after_merge} "
+                f"after_mi={_trace.after_mi} after_display={_trace.after_display} "
+                f"after_filter={_trace.after_filter} | error={_trace.error or 'none'}"
+            )
+        _raw_game_count = 0
+        for _raw in all_raw.values():
+            if not _raw.empty:
+                _raw_game_count = max(
+                    _raw_game_count,
+                    _raw[["home_team", "away_team"]].drop_duplicates().shape[0],
+                )
+        st.caption(f"debug: caption_label={caption_label} | unique games in raw data: {_raw_game_count}")
 
     with _fr2:
         _mkt_opts = ["All"] + (sorted(df_all["Market"].dropna().unique().tolist()) if not df_all.empty else [])
@@ -271,5 +286,5 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
     )
     st.caption(
         f"{len(_tbl_display)} result{'s' if len(_tbl_display) != 1 else ''} across "
-        f"{len(_book_sel_keys)} selected sportsbook{'s' if len(_book_sel_keys) != 1 else ''} — {caption_label}."
+        f"{len(_book_sel_keys)} selected sportsbook{'s' if len(_book_sel_keys) != 1 else ''}."
     )
