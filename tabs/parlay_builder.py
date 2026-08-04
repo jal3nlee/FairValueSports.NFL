@@ -4,7 +4,26 @@ import streamlit as st
 
 from core.odds_math import american_to_decimal, fmt_odds, parse_iso_dt_utc, EASTERN
 from core.pipeline import MARKETS, run_market_pipeline
-from core.data_sources import fetch_market_lines, filter_by_window, get_date_window
+from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
+
+NFL_TEAM_ABBR = {
+    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
+    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
+    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
+    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
+    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
+    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
+    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
+    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
+    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
+    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
+    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
+}
+
+
+def _logo_url(team_name: str) -> str | None:
+    abbr = NFL_TEAM_ABBR.get(team_name)
+    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{abbr}.png" if abbr else None
 
 
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
@@ -16,7 +35,6 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
     stake = st.number_input("Stake ($)", min_value=1.0, value=10.0, step=1.0, key="pb_stake")
     st.session_state.setdefault("pb_parlay_legs", [])
 
-    from core.data_sources import infer_current_week_index
     _wk = infer_current_week_index(now_utc)
     _week_label = "NFL Preseason" if _wk == 0 else f"NFL Week {_wk}"
     _window_choice = st.selectbox(
@@ -159,8 +177,23 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                 st.markdown(f"##### {_bucket.strftime('%a %I:%M %p ET').lstrip('0').replace(' 0', ' ')}")
                 _last_bucket = _bucket
 
+            _teams = _game_label.split(" vs ")
+            _ht = _teams[0] if len(_teams) == 2 else _game_label
+            _at = _teams[1] if len(_teams) == 2 else ""
+            _away_logo = _logo_url(_at)
+            _home_logo = _logo_url(_ht)
+
             with st.container(border=True):
-                st.markdown(f"**{_game_label}**")
+                if _away_logo and _home_logo:
+                    st.markdown(
+                        f"<img src='{_away_logo}' width='20' style='vertical-align:middle;margin-right:4px'/>"
+                        f"**{_at}** @ "
+                        f"<img src='{_home_logo}' width='20' style='vertical-align:middle;margin:0 4px'/>"
+                        f"**{_ht}**",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(f"**{_at} @ {_ht}**")
 
                 for _mkt_name in ["Moneyline", "Spread", "Total"]:
                     _mkt_rows = _game_rows[_game_rows["Market"] == _mkt_name]
