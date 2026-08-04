@@ -116,7 +116,7 @@ st.set_page_config(
 )
 
 SIDEBAR_W = 320
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 # =======================
 # SIDEBAR UI
