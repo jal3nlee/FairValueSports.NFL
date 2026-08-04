@@ -40,6 +40,14 @@ def run_pull():
             continue
         total_games += len(data)
 
+        # ── Temporary debug: show exactly what came back for preseason ──
+        if odds_api_sport_key == "americanfootball_nfl_preseason":
+            for g in data:
+                print(
+                    f"  preseason game: {g.get('away_team')} @ {g.get('home_team')} — "
+                    f"{g.get('commence_time')} — {len(g.get('bookmakers', []))} books"
+                )
+
         for market_key in markets:
             snapshot_id = str(uuid.uuid4())
             supabase.table("odds_snapshots").insert({
