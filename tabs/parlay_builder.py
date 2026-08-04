@@ -20,7 +20,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
     _wk = infer_current_week_index(now_utc)
     _week_label = "NFL Preseason" if _wk == 0 else f"NFL Week {_wk}"
     _window_choice = st.selectbox(
-        "Date Range", ["Today", _week_label, "Next 7 Days"], index=0, key="pb_window_choice",
+        "Date Range", ["Today", _week_label, "Next 7 Days"], index=1, key="pb_window_choice",
     )
     window_start, window_end, sport_keys, caption_label = get_date_window(now_utc, _window_choice)
 
