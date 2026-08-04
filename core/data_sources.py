@@ -101,7 +101,11 @@ def nfl_week_window_utc(week_index: int, now_utc: datetime):
     yr = now_utc.astimezone(EASTERN).year
     wk1 = thursday_after_labor_day_utc(yr)
     if week_index == 0:
-        start = datetime(yr, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        # Preseason: today through the day before Week 1 — never look
+        # backward, or already-played games (e.g. last season's Super
+        # Bowl) can fall inside the window and get shown as upcoming.
+        _local_start = now_utc.astimezone(EASTERN).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = _local_start.astimezone(timezone.utc)
         end = wk1 - timedelta(seconds=1)
         return start, end
     start = thursday_after_labor_day_utc(yr) + timedelta(days=7 * (week_index - 1))
