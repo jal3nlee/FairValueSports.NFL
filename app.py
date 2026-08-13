@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from streamlit_cookies_manager import EncryptedCookieManager
 
 from core.data_sources import infer_current_week_index
-from tabs import market_movers, fair_value_model, matchup_center, player_research, sportsbook_screener, parlay_builder
+from tabs import market_movers, fair_value_model, matchup_center, player_research, fantasy_draft, sportsbook_screener, parlay_builder
 
 # =======================
 # AUTH
@@ -211,8 +211,9 @@ with st.sidebar.expander("How to use", expanded=False):
    and Odds, and compare Best Odds against our Fair Odds estimate.
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
 4. **Player Research** — player-level lookup and analysis.
-5. **Sportsbook Screener** — pure line shopping across every sportsbook.
-6. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
+5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
+6. **Sportsbook Screener** — pure line shopping across every sportsbook.
+7. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
         """
     )
 
@@ -292,6 +293,7 @@ def run_app():
         "Fair Value Model",
         "Matchup Center",
         "Player Research",
+        "Fantasy Draft",
         "Sportsbook Screener",
         "Parlay Builder",
     ])
@@ -309,9 +311,12 @@ def run_app():
         player_research.render()
 
     with tabs[4]:
-        sportsbook_screener.render(supabase, now_utc)
+        fantasy_draft.render()
 
     with tabs[5]:
+        sportsbook_screener.render(supabase, now_utc)
+
+    with tabs[6]:
         parlay_builder.render(supabase, now_utc, eff_bankroll, eff_kelly, authed)
 
 
