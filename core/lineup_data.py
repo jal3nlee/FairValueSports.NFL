@@ -1,0 +1,263 @@
+# core/lineup_data.py
+# Data layer for Lineup Comparison. Reuses the existing odds pipeline
+# (spread/total/event_id already in Supabase) rather than re-fetching,
+# and adds a live, cached pull of player props from The Odds API's
+# per-event endpoint — the one piece that genuinely doesn't exist
+# anywhere else in the app yet.
+import os
+import requests
+import streamlit as st
+import pandas as pd
+
+from core.data_sources import fetch_market_lines, get_date_window
+from core.pipeline import MARKETS
+
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+ODDS_API_SPORT_KEY = "americanfootball_nfl"
+
+# Props relevant per position — only these get requested/shown, per spec.
+POSITION_PROP_MARKETS = {
+    "QB": [
+        "player_pass_yds", "player_pass_tds", "player_pass_interceptions",
+        "player_pass_attempts", "player_pass_completions",
+        "player_rush_yds", "player_anytime_td",
+    ],
+    "RB": [
+        "player_rush_yds", "player_rush_attempts",
+        "player_reception_yds", "player_receptions", "player_anytime_td",
+    ],
+    "WR": ["player_reception_yds", "player_receptions", "player_anytime_td"],
+    "TE": ["player_reception_yds", "player_receptions", "player_anytime_td"],
+}
+
+PROP_LABELS = {
+    "player_pass_yds": "Passing Yards",
+    "player_pass_tds": "Passing TDs",
+    "player_pass_interceptions": "Interceptions",
+    "player_pass_attempts": "Pass Attempts",
+    "player_pass_completions": "Completions",
+    "player_rush_yds": "Rushing Yards",
+    "player_rush_attempts": "Rush Attempts",
+    "player_reception_yds": "Receiving Yards",
+    "player_receptions": "Receptions",
+    "player_anytime_td": "Anytime TD",
+}
+
+
+# =======================
+# ESPN — free player identity/search source (no key required)
+# =======================
+@st.cache_data(ttl=3600, show_spinner=False)
+def espn_search_players(query: str) -> list[dict]:
+    """Search NFL players via ESPN's public site API. Free, unofficial, no key."""
+    if not query or len(query.strip()) < 2:
+        return []
+    try:
+        r = requests.get(
+            "https://site.web.api.espn.com/apis/common/v3/search",
+            params={"query": query.strip(), "limit": 10, "type": "player", "sport": "football", "league": "nfl"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return []
+        results = []
+        for item in r.json().get("items", []):
+            for res in item.get("results", []):
+                if res.get("type") != "player":
+                    continue
+                results.append({
+                    "id": res.get("uid", res.get("id")),
+                    "name": res.get("displayName", ""),
+                    "team": (res.get("subtitle") or "").strip(),
+                })
+        return results
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def espn_team_roster(team_abbr: str) -> list[dict]:
+    """Fallback/manual-entry path: full roster for a team, so a user can pick
+    a player even if fuzzy search above doesn't resolve cleanly."""
+    try:
+        r = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_abbr}/roster",
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return []
+        out = []
+        for group in r.json().get("athletes", []):
+            for p in group.get("items", []):
+                out.append({
+                    "id": p.get("id"),
+                    "name": p.get("fullName", ""),
+                    "position": (p.get("position") or {}).get("abbreviation", ""),
+                    "team": team_abbr,
+                })
+        return out
+    except Exception:
+        return []
+
+
+# =======================
+# Game environment — reuses the existing odds pipeline, no new fetch
+# =======================
+def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
+    """
+    Finds this team's next game from data already in Supabase (same
+    odds_lines your Fair Value Model/Matchup Center already read) and
+    returns spread, total, opponent, commence_time, event_id.
+    """
+    wk = 1  # placeholder — actual current-week lookup lives in core/data_sources
+    from core.data_sources import infer_current_week_index, get_date_window
+    window_start, window_end, sport_keys, _ = get_date_window(now_utc, "Next 7 Days")
+
+    raw, _ = fetch_market_lines(supabase, sport_keys, "spread")
+    if raw.empty:
+        return {}
+    games = raw[raw["home_team"].eq(team_name) | raw["away_team"].eq(team_name)]
+    if games.empty:
+        return {}
+    g = games.sort_values("commence_time").iloc[0]
+    is_home = g["home_team"] == team_name
+    opponent = g["away_team"] if is_home else g["home_team"]
+
+    total_raw, _ = fetch_market_lines(supabase, sport_keys, "total")
+    total_game = total_raw[total_raw["event_id"] == g["event_id"]]
+    game_total = None
+    if not total_game.empty and "line" in total_game.columns:
+        vals = total_game["line"].dropna()
+        if not vals.empty:
+            game_total = float(vals.iloc[0])
+
+    team_spread = float(g["line"]) if pd.notna(g.get("line")) else None
+    if team_spread is not None and not is_home:
+        team_spread = -team_spread  # normalize to this team's own perspective
+
+    return {
+        "event_id": g["event_id"],
+        "opponent": opponent,
+        "is_home": is_home,
+        "commence_time": g["commence_time"],
+        "spread": team_spread,
+        "game_total": game_total,
+        "team_implied_total": calculate_team_implied_total(game_total, team_spread),
+    }
+
+
+def calculate_team_implied_total(game_total: float | None, team_spread: float | None):
+    """
+    team_implied = (game_total / 2) - (team_spread / 2)
+
+    Worked example: total=49.5, this team favored by 4.5 (spread=-4.5):
+        implied = 24.75 - (-2.25) = 27.0   <- favorite gets the larger half
+    Opponent, spread=+4.5:
+        implied = 24.75 - 2.25 = 22.5      <- 27.0 + 22.5 = 49.5, checks out
+    """
+    if game_total is None or team_spread is None:
+        return None
+    return round((game_total / 2) - (team_spread / 2), 1)
+
+
+# =======================
+# Player props — live, per-event, cached. Real Odds API data, not stored
+# anywhere yet since no Player Props tab/pipeline exists in this repo.
+# =======================
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
+    markets = POSITION_PROP_MARKETS.get(position, [])
+    if not markets or not ODDS_API_KEY:
+        return []
+    try:
+        r = requests.get(
+            f"https://api.the-odds-api.com/v4/sports/{ODDS_API_SPORT_KEY}/events/{event_id}/odds",
+            params={
+                "apiKey": ODDS_API_KEY,
+                "regions": "us",
+                "markets": ",".join(markets),
+                "oddsFormat": "american",
+            },
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        rows = []
+        for book in data.get("bookmakers", []):
+            for market in book.get("markets", []):
+                for outcome in market.get("outcomes", []):
+                    rows.append({
+                        "market": market["key"],
+                        "player": outcome.get("description", ""),
+                        "book": book["key"],
+                        "line": outcome.get("point"),
+                        "side": outcome.get("name"),  # "Over"/"Under" or "Yes"/"No" for anytime TD
+                        "price": outcome.get("price"),
+                    })
+        return rows
+    except Exception:
+        return []
+
+
+def get_consensus_prop_line(prop_rows: list[dict], player_name: str, market_key: str):
+    """
+    Median 'Over' line across books for this player/market — a simple,
+    outlier-resistant consensus, not the full weighted no-vig engine used
+    for game lines (that's overkill for "what does the market expect
+    this player to produce," per the spec's own framing).
+    """
+    vals = [
+        r["line"] for r in prop_rows
+        if r["player"].strip().lower() == player_name.strip().lower()
+        and r["market"] == market_key
+        and r.get("side") in ("Over", "Yes")
+        and r.get("line") is not None
+    ]
+    if not vals:
+        return None
+    vals.sort()
+    n = len(vals)
+    return vals[n // 2] if n % 2 else round((vals[n // 2 - 1] + vals[n // 2]) / 2, 1)
+
+
+def get_relevant_props_for_position(position: str) -> list[str]:
+    return POSITION_PROP_MARKETS.get(position, [])
+
+
+def build_player_comparison(supabase, players: list[dict], now_utc) -> list[dict]:
+    """
+    players: [{"name":..., "team":..., "position":..., "role": "Roster"/"Bench"/"Waiver"}]
+    Returns each player enriched with real game context + real prop consensus.
+    Fantasy Outlook / Usage / Matchup are intentionally left as None — no
+    data source exists for those yet, and this function must not invent one.
+    """
+    enriched = []
+    for p in players:
+        ctx = get_team_game_context(supabase, p["team"], now_utc) if p.get("team") else {}
+        props = {}
+        if ctx.get("event_id"):
+            raw_props = fetch_player_props_for_event(ctx["event_id"], p["position"])
+            for market_key in get_relevant_props_for_position(p["position"]):
+                props[market_key] = get_consensus_prop_line(raw_props, p["name"], market_key)
+        enriched.append({**p, "context": ctx, "props": props})
+    return enriched
+
+
+def generate_comparison_notes(enriched_players: list[dict]) -> list[str]:
+    """Deterministic, data-driven observations only — never a start/sit verdict."""
+    notes = []
+    totals = [(p["name"], p["context"].get("team_implied_total")) for p in enriched_players if p["context"].get("team_implied_total") is not None]
+    if len(totals) >= 2:
+        totals.sort(key=lambda x: x[1], reverse=True)
+        notes.append(f"{totals[0][0]}'s team has the higher implied point total ({totals[0][1]} vs {totals[-1][1]}).")
+
+    for market_key, label in [("player_reception_yds", "receiving yards"), ("player_rush_yds", "rushing yards")]:
+        vals = [(p["name"], p["props"].get(market_key)) for p in enriched_players if p["props"].get(market_key) is not None]
+        if len(vals) >= 2:
+            vals.sort(key=lambda x: x[1], reverse=True)
+            notes.append(f"{vals[0][0]} has the higher {label} line ({vals[0][1]} vs {vals[-1][1]}).")
+
+    if not notes:
+        notes.append("Not enough market data available yet to compare these players — check back closer to kickoff as more books post lines.")
+    return notes
