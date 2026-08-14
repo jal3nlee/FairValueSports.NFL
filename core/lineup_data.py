@@ -36,8 +36,6 @@ PROP_LABELS = {
     "player_anytime_td": "Anytime TD",
 }
 
-# Same abbreviation map used elsewhere in the app (matchup_center.py's
-# logo lookups) — kept identical rather than introducing a second version.
 NFL_TEAMS = {
     "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
     "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
@@ -53,13 +51,11 @@ NFL_TEAMS = {
 }
 
 POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"]
+FLEX_POSITIONS = ["RB", "WR", "TE"]
 
 DEBUG_LINEUP = True  # temporary — remove once search is confirmed working
 
 
-# =======================
-# ESPN — free player identity/search source (no key required)
-# =======================
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_search_players(query: str) -> list[dict]:
     """Search NFL players via ESPN's public site API. Free, unofficial, no key."""
@@ -76,8 +72,6 @@ def espn_search_players(query: str) -> list[dict]:
                 st.error(f"debug: ESPN search returned status {r.status_code} — {r.text[:300]}")
             return []
         payload = r.json()
-        if DEBUG_LINEUP:
-            st.caption(f"debug: ESPN search top-level keys = {list(payload.keys())}")
         results = []
         for item in payload.get("items", []):
             for res in item.get("results", []):
@@ -87,9 +81,8 @@ def espn_search_players(query: str) -> list[dict]:
                     "id": res.get("uid", res.get("id")),
                     "name": res.get("displayName", ""),
                     "team": (res.get("subtitle") or "").strip(),
+                    "position": (res.get("description") or "").strip(),  # best-effort — not confirmed reliable
                 })
-        if DEBUG_LINEUP and not results:
-            st.caption(f"debug: ESPN search returned 0 parsed players — raw payload sample: {str(payload)[:500]}")
         return results
     except Exception as e:
         if DEBUG_LINEUP:
@@ -98,8 +91,8 @@ def espn_search_players(query: str) -> list[dict]:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def espn_team_roster(team_abbr: str) -> list[dict]:
-    """Full roster for one team — the browse-by-team fallback path."""
+def get_players_by_team(team_abbr: str) -> list[dict]:
+    """Full roster for one team — used by Browse Team."""
     try:
         r = requests.get(
             f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_abbr}/roster",
@@ -121,13 +114,18 @@ def espn_team_roster(team_abbr: str) -> list[dict]:
         return out
     except Exception as e:
         if DEBUG_LINEUP:
-            st.error(f"debug: espn_team_roster failed — {type(e).__name__}: {e}")
+            st.error(f"debug: get_players_by_team failed — {type(e).__name__}: {e}")
         return []
 
 
-# =======================
-# Game environment — reuses the existing odds pipeline, no new fetch
-# =======================
+def get_players_by_position(team_abbr: str, position: str) -> list[dict]:
+    """Roster for a team filtered to one position, or all if position == 'All'."""
+    roster = get_players_by_team(team_abbr)
+    if position == "All":
+        return roster
+    return [p for p in roster if p.get("position") == position]
+
+
 def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
     window_start, window_end, sport_keys, _ = get_date_window(now_utc, "Next 7 Days")
 
@@ -165,14 +163,17 @@ def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
 
 
 def calculate_team_implied_total(game_total: float | None, team_spread: float | None):
+    """
+    team_implied = (game_total / 2) - (team_spread / 2)
+    Worked example: total=49.5, this team favored by 4.5 (spread=-4.5):
+        implied = 24.75 - (-2.25) = 27.0
+    Opponent, spread=+4.5: implied = 24.75 - 2.25 = 22.5   (27.0 + 22.5 = 49.5, checks out)
+    """
     if game_total is None or team_spread is None:
         return None
     return round((game_total / 2) - (team_spread / 2), 1)
 
 
-# =======================
-# Player props — live, per-event, cached
-# =======================
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
     markets = POSITION_PROP_MARKETS.get(position, [])
@@ -182,10 +183,8 @@ def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
         r = requests.get(
             f"https://api.the-odds-api.com/v4/sports/{ODDS_API_SPORT_KEY}/events/{event_id}/odds",
             params={
-                "apiKey": ODDS_API_KEY,
-                "regions": "us",
-                "markets": ",".join(markets),
-                "oddsFormat": "american",
+                "apiKey": ODDS_API_KEY, "regions": "us",
+                "markets": ",".join(markets), "oddsFormat": "american",
             },
             timeout=15,
         )
@@ -197,12 +196,9 @@ def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
             for market in book.get("markets", []):
                 for outcome in market.get("outcomes", []):
                     rows.append({
-                        "market": market["key"],
-                        "player": outcome.get("description", ""),
-                        "book": book["key"],
-                        "line": outcome.get("point"),
-                        "side": outcome.get("name"),
-                        "price": outcome.get("price"),
+                        "market": market["key"], "player": outcome.get("description", ""),
+                        "book": book["key"], "line": outcome.get("point"),
+                        "side": outcome.get("name"), "price": outcome.get("price"),
                     })
         return rows
     except Exception:
@@ -213,9 +209,7 @@ def get_consensus_prop_line(prop_rows: list[dict], player_name: str, market_key:
     vals = [
         r["line"] for r in prop_rows
         if r["player"].strip().lower() == player_name.strip().lower()
-        and r["market"] == market_key
-        and r.get("side") in ("Over", "Yes")
-        and r.get("line") is not None
+        and r["market"] == market_key and r.get("side") in ("Over", "Yes") and r.get("line") is not None
     ]
     if not vals:
         return None
@@ -241,12 +235,14 @@ def build_player_comparison(supabase, players: list[dict], now_utc) -> list[dict
     return enriched
 
 
-def generate_comparison_notes(enriched_players: list[dict]) -> list[str]:
+def generate_key_differences(enriched_players: list[dict]) -> list[str]:
+    """Deterministic, data-driven observations only — never a start/sit verdict."""
     notes = []
     totals = [(p["name"], p["context"].get("team_implied_total")) for p in enriched_players if p["context"].get("team_implied_total") is not None]
     if len(totals) >= 2:
         totals.sort(key=lambda x: x[1], reverse=True)
-        notes.append(f"{totals[0][0]}'s team has the higher implied point total ({totals[0][1]} vs {totals[-1][1]}).")
+        diff = round(totals[0][1] - totals[-1][1], 1)
+        notes.append(f"{totals[0][0]}'s team is implied to score {diff} more points.")
 
     for market_key, label in [("player_reception_yds", "receiving yards"), ("player_rush_yds", "rushing yards")]:
         vals = [(p["name"], p["props"].get(market_key)) for p in enriched_players if p["props"].get(market_key) is not None]
@@ -254,6 +250,11 @@ def generate_comparison_notes(enriched_players: list[dict]) -> list[str]:
             vals.sort(key=lambda x: x[1], reverse=True)
             notes.append(f"{vals[0][0]} has the higher {label} line ({vals[0][1]} vs {vals[-1][1]}).")
 
+    td_vals = [(p["name"], p["props"].get("player_anytime_td")) for p in enriched_players if p["props"].get("player_anytime_td") is not None]
+    if len(td_vals) >= 2:
+        td_vals.sort(key=lambda x: x[1])
+        notes.append(f"{td_vals[0][0]} has the more favorable anytime-TD price.")
+
     if not notes:
         notes.append("Not enough market data available yet to compare these players — check back closer to kickoff as more books post lines.")
-    return notes
+    return notes[:4]
