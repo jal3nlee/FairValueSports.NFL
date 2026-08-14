@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from streamlit_cookies_manager import EncryptedCookieManager
 
 from core.data_sources import infer_current_week_index
-from tabs import market_movers, fair_value_model, matchup_center, player_research, fantasy_draft, sportsbook_screener, parlay_builder
+from tabs import market_movers, fair_value_model, matchup_center, lineup_comparison, fantasy_draft, sportsbook_screener, parlay_builder
 
 # =======================
 # AUTH
@@ -127,6 +127,12 @@ with st.sidebar:
     else:
         st.title("Fair Value Betting")
 
+    st.markdown(
+        "[fairvaluebetting.com](https://fairvaluebetting.com)  ·  "
+        "⚾ [MLB](https://mlb.fairvaluebetting.com)  ·  "
+        "🏈 [NCAAF](https://ncaaf.fairvaluebetting.com)"
+    )
+
     st.sidebar.divider()
 
     if authed:
@@ -210,7 +216,7 @@ with st.sidebar.expander("How to use", expanded=False):
 2. **Fair Value Model** — pick a Date Range and Market, filter by Expected Value
    and Odds, and compare Best Odds against our Fair Odds estimate.
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
-4. **Player Research** — player-level lookup and analysis.
+4. **Lineup Comparison** — compare fantasy players side by side using real game odds and market props.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
 6. **Sportsbook Screener** — pure line shopping across every sportsbook.
 7. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
@@ -274,25 +280,17 @@ with st.sidebar.expander("Disclaimer", expanded=False):
 def run_app():
     now_utc = datetime.now(timezone.utc)
 
-    # ── Bankroll / Kelly — shared across tabs that size stakes ──────
+    # Bankroll/Kelly UI removed from the sidebar for now — using fixed
+    # defaults under the hood since several tabs still require these
+    # as arguments. Re-add a sidebar control later if needed.
     eff_bankroll = 1000.0
     eff_kelly = 0.5
-    if authed:
-        with st.sidebar:
-            st.markdown("---")
-            st.markdown("**Bankroll Settings**")
-            eff_bankroll = st.number_input(
-                "Weekly Bankroll ($)", min_value=0.0, value=1000.0, step=50.0, key="app_bankroll",
-            )
-            eff_kelly = st.slider(
-                "Kelly Factor", min_value=0.0, max_value=1.0, value=0.5, step=0.05, key="app_kelly",
-            )
 
     tabs = st.tabs([
         "Market Movers",
         "Fair Value Model",
         "Matchup Center",
-        "Player Research",
+        "Lineup Comparison",
         "Fantasy Draft",
         "Sportsbook Screener",
         "Parlay Builder",
@@ -308,7 +306,7 @@ def run_app():
         matchup_center.render(supabase, now_utc, eff_bankroll, eff_kelly)
 
     with tabs[3]:
-        player_research.render()
+        lineup_comparison.render(supabase, now_utc)
 
     with tabs[4]:
         fantasy_draft.render()
