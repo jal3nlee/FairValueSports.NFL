@@ -4,3 +4,4 @@ requests
 supabase>=2.4.0 
 pillow
 streamlit-cookies-manager
+openpyxl
