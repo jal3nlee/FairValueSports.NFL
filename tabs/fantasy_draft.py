@@ -1,4 +1,5 @@
 # tabs/fantasy_draft.py
+import os
 import streamlit as st
 import pandas as pd
 
@@ -14,6 +15,15 @@ POSITIONS = ["Overall", "QB", "RB", "WR", "TE", "K", "DST"]
 
 def render():
     st.markdown("## Fantasy Draft")
+
+    # ── Temporary debug — remove once the file path issue is confirmed fixed ──
+    st.caption(f"debug: cwd = {os.getcwd()}")
+    st.caption(f"debug: repo root contents = {os.listdir('.')}")
+    if os.path.isdir("data"):
+        st.caption(f"debug: data/ contents = {os.listdir('data')}")
+    else:
+        st.caption("debug: no 'data' folder found at all")
+
     st.caption(
         "Consensus draft rankings pulled from ESPN, Sleeper, CBS, NFL, RTSports, and Fantrax — "
         "see where the fantasy market agrees, and where it doesn't."
