@@ -1,21 +1,14 @@
 # core/lineup_data.py
-# Data layer for Lineup Comparison. Reuses the existing odds pipeline
-# (spread/total/event_id already in Supabase) rather than re-fetching,
-# and adds a live, cached pull of player props from The Odds API's
-# per-event endpoint — the one piece that genuinely doesn't exist
-# anywhere else in the app yet.
 import os
 import requests
 import streamlit as st
 import pandas as pd
 
 from core.data_sources import fetch_market_lines, get_date_window
-from core.pipeline import MARKETS
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 ODDS_API_SPORT_KEY = "americanfootball_nfl"
 
-# Props relevant per position — only these get requested/shown, per spec.
 POSITION_PROP_MARKETS = {
     "QB": [
         "player_pass_yds", "player_pass_tds", "player_pass_interceptions",
@@ -43,6 +36,26 @@ PROP_LABELS = {
     "player_anytime_td": "Anytime TD",
 }
 
+# Same abbreviation map used elsewhere in the app (matchup_center.py's
+# logo lookups) — kept identical rather than introducing a second version.
+NFL_TEAMS = {
+    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
+    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
+    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
+    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
+    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
+    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
+    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
+    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
+    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
+    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
+    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
+}
+
+POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"]
+
+DEBUG_LINEUP = True  # temporary — remove once search is confirmed working
+
 
 # =======================
 # ESPN — free player identity/search source (no key required)
@@ -59,9 +72,14 @@ def espn_search_players(query: str) -> list[dict]:
             timeout=10,
         )
         if r.status_code != 200:
+            if DEBUG_LINEUP:
+                st.error(f"debug: ESPN search returned status {r.status_code} — {r.text[:300]}")
             return []
+        payload = r.json()
+        if DEBUG_LINEUP:
+            st.caption(f"debug: ESPN search top-level keys = {list(payload.keys())}")
         results = []
-        for item in r.json().get("items", []):
+        for item in payload.get("items", []):
             for res in item.get("results", []):
                 if res.get("type") != "player":
                     continue
@@ -70,21 +88,26 @@ def espn_search_players(query: str) -> list[dict]:
                     "name": res.get("displayName", ""),
                     "team": (res.get("subtitle") or "").strip(),
                 })
+        if DEBUG_LINEUP and not results:
+            st.caption(f"debug: ESPN search returned 0 parsed players — raw payload sample: {str(payload)[:500]}")
         return results
-    except Exception:
+    except Exception as e:
+        if DEBUG_LINEUP:
+            st.error(f"debug: espn_search_players failed — {type(e).__name__}: {e}")
         return []
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_team_roster(team_abbr: str) -> list[dict]:
-    """Fallback/manual-entry path: full roster for a team, so a user can pick
-    a player even if fuzzy search above doesn't resolve cleanly."""
+    """Full roster for one team — the browse-by-team fallback path."""
     try:
         r = requests.get(
             f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_abbr}/roster",
             timeout=10,
         )
         if r.status_code != 200:
+            if DEBUG_LINEUP:
+                st.error(f"debug: ESPN roster returned status {r.status_code} for team={team_abbr}")
             return []
         out = []
         for group in r.json().get("athletes", []):
@@ -96,7 +119,9 @@ def espn_team_roster(team_abbr: str) -> list[dict]:
                     "team": team_abbr,
                 })
         return out
-    except Exception:
+    except Exception as e:
+        if DEBUG_LINEUP:
+            st.error(f"debug: espn_team_roster failed — {type(e).__name__}: {e}")
         return []
 
 
@@ -104,13 +129,6 @@ def espn_team_roster(team_abbr: str) -> list[dict]:
 # Game environment — reuses the existing odds pipeline, no new fetch
 # =======================
 def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
-    """
-    Finds this team's next game from data already in Supabase (same
-    odds_lines your Fair Value Model/Matchup Center already read) and
-    returns spread, total, opponent, commence_time, event_id.
-    """
-    wk = 1  # placeholder — actual current-week lookup lives in core/data_sources
-    from core.data_sources import infer_current_week_index, get_date_window
     window_start, window_end, sport_keys, _ = get_date_window(now_utc, "Next 7 Days")
 
     raw, _ = fetch_market_lines(supabase, sport_keys, "spread")
@@ -133,7 +151,7 @@ def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
 
     team_spread = float(g["line"]) if pd.notna(g.get("line")) else None
     if team_spread is not None and not is_home:
-        team_spread = -team_spread  # normalize to this team's own perspective
+        team_spread = -team_spread
 
     return {
         "event_id": g["event_id"],
@@ -147,22 +165,13 @@ def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
 
 
 def calculate_team_implied_total(game_total: float | None, team_spread: float | None):
-    """
-    team_implied = (game_total / 2) - (team_spread / 2)
-
-    Worked example: total=49.5, this team favored by 4.5 (spread=-4.5):
-        implied = 24.75 - (-2.25) = 27.0   <- favorite gets the larger half
-    Opponent, spread=+4.5:
-        implied = 24.75 - 2.25 = 22.5      <- 27.0 + 22.5 = 49.5, checks out
-    """
     if game_total is None or team_spread is None:
         return None
     return round((game_total / 2) - (team_spread / 2), 1)
 
 
 # =======================
-# Player props — live, per-event, cached. Real Odds API data, not stored
-# anywhere yet since no Player Props tab/pipeline exists in this repo.
+# Player props — live, per-event, cached
 # =======================
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
@@ -192,7 +201,7 @@ def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
                         "player": outcome.get("description", ""),
                         "book": book["key"],
                         "line": outcome.get("point"),
-                        "side": outcome.get("name"),  # "Over"/"Under" or "Yes"/"No" for anytime TD
+                        "side": outcome.get("name"),
                         "price": outcome.get("price"),
                     })
         return rows
@@ -201,12 +210,6 @@ def fetch_player_props_for_event(event_id: str, position: str) -> list[dict]:
 
 
 def get_consensus_prop_line(prop_rows: list[dict], player_name: str, market_key: str):
-    """
-    Median 'Over' line across books for this player/market — a simple,
-    outlier-resistant consensus, not the full weighted no-vig engine used
-    for game lines (that's overkill for "what does the market expect
-    this player to produce," per the spec's own framing).
-    """
     vals = [
         r["line"] for r in prop_rows
         if r["player"].strip().lower() == player_name.strip().lower()
@@ -226,12 +229,6 @@ def get_relevant_props_for_position(position: str) -> list[str]:
 
 
 def build_player_comparison(supabase, players: list[dict], now_utc) -> list[dict]:
-    """
-    players: [{"name":..., "team":..., "position":..., "role": "Roster"/"Bench"/"Waiver"}]
-    Returns each player enriched with real game context + real prop consensus.
-    Fantasy Outlook / Usage / Matchup are intentionally left as None — no
-    data source exists for those yet, and this function must not invent one.
-    """
     enriched = []
     for p in players:
         ctx = get_team_game_context(supabase, p["team"], now_utc) if p.get("team") else {}
@@ -245,7 +242,6 @@ def build_player_comparison(supabase, players: list[dict], now_utc) -> list[dict
 
 
 def generate_comparison_notes(enriched_players: list[dict]) -> list[str]:
-    """Deterministic, data-driven observations only — never a start/sit verdict."""
     notes = []
     totals = [(p["name"], p["context"].get("team_implied_total")) for p in enriched_players if p["context"].get("team_implied_total") is not None]
     if len(totals) >= 2:
