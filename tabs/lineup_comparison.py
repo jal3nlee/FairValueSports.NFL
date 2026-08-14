@@ -4,118 +4,201 @@ import pandas as pd
 
 from core.lineup_data import (
     espn_search_players,
-    espn_team_roster,
+    get_players_by_team,
+    get_players_by_position,
     build_player_comparison,
-    generate_comparison_notes,
+    generate_key_differences,
     PROP_LABELS,
+    NFL_TEAMS,
+    POSITIONS,
+    FLEX_POSITIONS,
 )
 
 ROLES = ["Roster", "Bench", "Waiver"]
 
 
-def _player_picker(slot_idx: int):
-    st.markdown(f"**Player {slot_idx + 1}**")
-    _q = st.text_input("Search player", key=f"lc_search_{slot_idx}", placeholder="Search player name...")
-    _results = espn_search_players(_q) if _q else []
-    if not _results:
-        if _q:
-            st.caption("No match found via search — try full name, or select manually below.")
+def _dash(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "—"
+    return v
+
+
+def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
+    names = set()
+    for i in range(n_slots):
+        if i == exclude_idx:
+            continue
+        p = st.session_state.get(f"lc_selected_{i}")
+        if p:
+            names.add(p["name"])
+    return names
+
+
+def render_selected_player_header(p: dict, mode: str, slot_idx: int):
+    ctx = p.get("context", {})
+    st.markdown(f"**{p['name']}**")
+    st.caption(f"{p['position']} · {p['team']}")
+    if ctx.get("opponent"):
+        _side = "vs" if ctx.get("is_home") else "@"
+        st.caption(f"{_side} {ctx['opponent']}")
+    if mode == "Waiver":
+        st.caption(f"**{p.get('role', 'Roster')}**")
+    if st.button("Change Player", key=f"lc_change_{slot_idx}", use_container_width=True):
+        st.session_state.pop(f"lc_selected_{slot_idx}", None)
+        st.rerun()
+
+
+def render_player_search(slot_idx: int, allowed_positions: list[str] | None, taken_names: set[str]):
+    _q = st.text_input(
+        "Search player name...", key=f"lc_search_{slot_idx}",
+        placeholder="Search player name...", label_visibility="collapsed",
+    )
+    if not _q:
         return None
-    _labels = {f"{r['name']} ({r['team']})": r for r in _results}
+    _results = espn_search_players(_q)
+    _results = [r for r in _results if r["name"] not in taken_names]
+    if allowed_positions:
+        _results = [r for r in _results if not r.get("position") or r["position"] in allowed_positions]
+    if not _results:
+        st.caption("No match found — try the full name, or switch to Browse Team.")
+        return None
+    _labels = {}
+    for r in _results:
+        _ctx = f"{r['position']}, {r['team']}" if r.get("position") else r["team"]
+        _labels[f"{r['name']} — {_ctx}"] = r
     _picked = st.selectbox("Result", list(_labels.keys()), key=f"lc_pick_{slot_idx}", label_visibility="collapsed")
-    return _labels[_picked]
+    r = _labels[_picked]
+    _team_abbr = r["team"].split(" ")[-1] if r.get("team") else ""
+    return {"name": r["name"], "team": _team_abbr, "position": r.get("position") or ""}
+
+
+def render_team_position_search(slot_idx: int, allowed_positions: list[str] | None, taken_names: set[str]):
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        _team_name = st.selectbox("Team", sorted(NFL_TEAMS.keys()), key=f"lc_team_{slot_idx}", label_visibility="collapsed")
+    _team_abbr = NFL_TEAMS.get(_team_name)
+    _pos_options = ["All"] + (allowed_positions or POSITIONS)
+    with _c2:
+        _position = st.selectbox("Position", _pos_options, key=f"lc_teampos_{slot_idx}", label_visibility="collapsed")
+
+    _roster = get_players_by_position(_team_abbr, _position) if _team_abbr else []
+    _roster = [p for p in _roster if p["name"] not in taken_names]
+    if not _roster:
+        st.caption("No matching players found for this team/position.")
+        return None
+    _options = {p["name"]: p for p in _roster if p.get("name")}
+    _picked_name = st.selectbox("Player", sorted(_options.keys()), key=f"lc_teamplayer_{slot_idx}")
+    p = _options[_picked_name]
+    return {"name": p["name"], "team": _team_name, "position": p.get("position") or _position if _position != "All" else p.get("position", "")}
+
+
+def render_player_selector(slot_idx: int, mode: str, n_slots: int):
+    st.markdown(f"**Player {slot_idx + 1}**")
+
+    _confirmed = st.session_state.get(f"lc_selected_{slot_idx}")
+    if _confirmed:
+        render_selected_player_header(_confirmed, mode, slot_idx)
+        return _confirmed
+
+    _allowed = FLEX_POSITIONS if mode == "FLEX" else None
+    _taken = _selected_names(slot_idx, n_slots)
+
+    _method = st.segmented_control(
+        "Method", ["Search Player", "Browse Team"], default="Search Player",
+        key=f"lc_method_{slot_idx}", label_visibility="collapsed",
+    ) or "Search Player"
+
+    if _method == "Search Player":
+        _p = render_player_search(slot_idx, _allowed, _taken)
+    else:
+        _p = render_team_position_search(slot_idx, _allowed, _taken)
+
+    if _p and _p["name"] not in _taken:
+        _role = "Roster"
+        if mode == "Waiver":
+            _role = st.selectbox("Role", ROLES, key=f"lc_role_{slot_idx}")
+        _p["role"] = _role
+        if st.button("Confirm", key=f"lc_confirm_{slot_idx}", use_container_width=True):
+            st.session_state[f"lc_selected_{slot_idx}"] = _p
+            st.rerun()
+    return None
 
 
 def render(supabase, now_utc):
     st.markdown("## Lineup Comparison")
-    st.caption(
-        "Compare players side by side using real game odds, market player props, and matchup context — "
-        "no proprietary score, just the information to make your own call."
-    )
+    st.caption("Compare fantasy projections, player props, game environment, and matchup context side by side.")
 
-    _mode = st.segmented_control("Comparison Mode", ["Start/Sit", "FLEX", "Waiver Compare"], default="Start/Sit", key="lc_mode") or "Start/Sit"
-    _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR", key="lc_scoring") or "PPR"
-
-    st.divider()
+    _tc1, _tc2 = st.columns([2, 1.4])
+    with _tc1:
+        _mode = st.segmented_control("Mode", ["Start/Sit", "FLEX", "Waiver"], default="Start/Sit", key="lc_mode") or "Start/Sit"
+    with _tc2:
+        _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR", key="lc_scoring") or "PPR"
 
     _n_slots = st.session_state.get("lc_n_slots", 2)
-    _slot_cols = st.columns(_n_slots)
-    _players = []
+    _slot_cols = st.columns(_n_slots, gap="medium")
+
+    _confirmed_players = []
     for i, col in enumerate(_slot_cols):
         with col:
-            _p = _player_picker(i)
+            _p = render_player_selector(i, _mode, _n_slots)
+            if i == _n_slots - 1 and _n_slots > 2:
+                if st.button("Remove", key=f"lc_remove_{i}", use_container_width=True):
+                    st.session_state.pop(f"lc_selected_{i}", None)
+                    st.session_state["lc_n_slots"] = _n_slots - 1
+                    st.rerun()
             if _p:
-                _pos = st.selectbox("Position", ["QB", "RB", "WR", "TE"], key=f"lc_pos_{i}")
-                _role = st.selectbox("Role", ROLES, key=f"lc_role_{i}")
-                _team = _p["team"].split(" ")[-1] if _p.get("team") else ""
-                _players.append({"name": _p["name"], "team": _team, "position": _pos, "role": _role})
+                _confirmed_players.append(_p)
 
-    _bc1, _bc2 = st.columns(2)
-    with _bc1:
-        if st.button("+ Add Player", disabled=_n_slots >= 4, use_container_width=True):
-            st.session_state["lc_n_slots"] = min(4, _n_slots + 1)
-            st.rerun()
-    with _bc2:
-        if st.button("Remove Last", disabled=_n_slots <= 2, use_container_width=True):
-            st.session_state["lc_n_slots"] = max(2, _n_slots - 1)
-            st.rerun()
+    if st.button("+ Add Player", disabled=_n_slots >= 4, key="lc_add"):
+        st.session_state["lc_n_slots"] = min(4, _n_slots + 1)
+        st.rerun()
 
-    st.divider()
-
-    if len(_players) < 2:
-        st.info(
-            "**Compare your lineup options**\n\n"
-            "Search for two or more players above to compare game environment, market props, "
-            "and weekly context."
-        )
+    if len(_confirmed_players) < 2:
+        st.caption("Select at least two players to begin comparing.")
         return
 
     with st.spinner("Loading market data..."):
-        enriched = build_player_comparison(supabase, _players, now_utc)
+        enriched = build_player_comparison(supabase, _confirmed_players, now_utc)
 
-    # ── Game Environment — real data ──────────────────────────
-    st.markdown("### Game Environment")
-    _env_rows = {"Metric": ["Opponent", "Spread", "Game Total", "Team Implied Total", "Home/Away"]}
-    for p in enriched:
-        ctx = p["context"]
-        _env_rows[p["name"]] = [
-            ctx.get("opponent", "—"),
-            ctx.get("spread", "—"),
-            ctx.get("game_total", "—"),
-            ctx.get("team_implied_total", "—"),
-            "Home" if ctx.get("is_home") else "Away" if ctx else "—",
-        ]
-    st.dataframe(pd.DataFrame(_env_rows), use_container_width=True, hide_index=True)
+    st.markdown("---")
 
-    # ── Betting Market (player props) — real data where available ──
-    st.markdown("### Betting Market")
-    st.caption("Consensus (median) line across books currently offering this prop.")
+    def _row(label, values, higher_is_better=True):
+        _real = [v for v in values if v is not None and not (isinstance(v, float) and pd.isna(v))]
+        best = max(_real) if higher_is_better and _real else (min(_real) if _real else None)
+        cells = []
+        for v in values:
+            disp = _dash(v)
+            if v is not None and best is not None and v == best and len(_real) > 1:
+                cells.append(f"**{disp}**")
+            else:
+                cells.append(str(disp))
+        return [label] + cells
+
+    _names = [p["name"] for p in enriched]
+
+    # ── Player Props ──────────────────────────────────
     _all_markets = sorted(set(m for p in enriched for m in p["props"].keys()))
-    if not _all_markets:
-        st.info("No player prop lines currently available for these players' games.")
-    else:
-        _prop_rows = {"Prop": [PROP_LABELS.get(m, m) for m in _all_markets]}
-        for p in enriched:
-            _prop_rows[p["name"]] = [
-                p["props"].get(m, "—") if p["props"].get(m) is not None else "—" for m in _all_markets
-            ]
-        st.dataframe(pd.DataFrame(_prop_rows), use_container_width=True, hide_index=True)
+    if _all_markets:
+        st.markdown("### Player Props")
+        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
+        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
 
-    # ── Sections with no real data source yet — honest, not fabricated ──
-    st.markdown("### Fantasy Outlook")
-    st.info("Projected points, floor/ceiling, and positional rank require a fantasy projections provider — not yet connected.")
+    # ── Game Environment ──────────────────────────────
+    _has_env = any(p["context"] for p in enriched)
+    if _has_env:
+        st.markdown("### Game Environment")
+        _env_metrics = [
+            ("Opponent", [p["context"].get("opponent") for p in enriched], None),
+            ("Spread", [p["context"].get("spread") for p in enriched], False),
+            ("Game Total", [p["context"].get("game_total") for p in enriched], True),
+            ("Team Implied Total", [p["context"].get("team_implied_total") for p in enriched], True),
+        ]
+        _rows = []
+        for label, vals, higher in _env_metrics:
+            _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
+        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
 
-    st.markdown("### Usage / Opportunity")
-    st.info("Snap share, targets, and red-zone usage require a play-by-play/usage data provider — not yet connected.")
-
-    st.markdown("### Matchup")
-    st.info("Opponent defensive rankings and points allowed by position require a stats provider — not yet connected.")
-
-    # ── Comparison Notes — deterministic, no verdict ──────────
-    st.markdown("### Comparison Notes")
-    for note in generate_comparison_notes(enriched):
+    # ── Key Differences ───────────────────────────────
+    st.markdown("### Key Differences")
+    for note in generate_key_differences(enriched):
         st.markdown(f"- {note}")
-
-    with st.expander("Roles"):
-        for p in enriched:
-            st.caption(f"**{p['name']}** — {p['role']}")
