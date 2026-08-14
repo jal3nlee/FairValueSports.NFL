@@ -10,6 +10,7 @@ from core.fantasy_data import (
 )
 
 POSITIONS = ["Overall", "QB", "RB", "WR", "TE", "K", "DST"]
+DEBUG_FD = True  # temporary — remove once the empty-table issue is confirmed fixed
 
 
 def render():
@@ -20,6 +21,8 @@ def render():
     )
 
     raw = load_fantasy_rankings()
+    if DEBUG_FD:
+        st.caption(f"debug: raw rows loaded = {len(raw)}, columns = {list(raw.columns)}")
     if raw.empty:
         st.info(
             "No fantasy rankings data found. Add the ADP file to the repo at "
@@ -28,6 +31,8 @@ def render():
         return
 
     df, platform_cols = build_ranking_table(raw)
+    if DEBUG_FD:
+        st.caption(f"debug: rows after build_ranking_table = {len(df)}, platform_cols = {platform_cols}")
     if df.empty:
         st.warning("Rankings data couldn't be processed. Check the file formatting.")
         return
@@ -54,13 +59,12 @@ def render():
     ) or "Consensus"
 
     _filtered = filter_fantasy_rankings(df, _position, _search)
+    if DEBUG_FD:
+        st.caption(f"debug: rows after filter (position={_position!r}, search={_search!r}) = {len(_filtered)}")
 
     if _view == "Biggest Disagreement":
         _filtered = _filtered.sort_values("Range", ascending=False, na_position="last").reset_index(drop=True)
     elif _view == "Best Available":
-        # Same order as Consensus for now — the drafted-player hide/track
-        # logic below is wired up so this becomes a real "who's left"
-        # view once live-draft tracking is built out.
         st.session_state.setdefault("fd_drafted_players", set())
         _drafted = st.multiselect(
             "Mark players as drafted (removes them from Best Available)",
@@ -70,6 +74,8 @@ def render():
         st.session_state["fd_drafted_players"] = set(_drafted)
         _filtered = _filtered[~_filtered["Name"].isin(st.session_state["fd_drafted_players"])]
         _filtered = _filtered.sort_values("AvgADP", ascending=True, na_position="last").reset_index(drop=True)
+        if DEBUG_FD:
+            st.caption(f"debug: rows after Best Available drafted-filter = {len(_filtered)}")
 
     if _filtered.empty:
         st.info("No players match the current filters.")
@@ -91,6 +97,9 @@ def render():
     _display["Avg ADP"] = _filtered["AvgADP"]
     _display["Range"] = _filtered["Range"]
     _display["Agreement"] = _filtered["Agreement"]
+
+    if DEBUG_FD:
+        st.caption(f"debug: final _display shape = {_display.shape}")
 
     st.dataframe(
         _display,
