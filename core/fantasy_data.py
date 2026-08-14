@@ -46,13 +46,13 @@ def _parse_player_field(raw: str) -> tuple[str, str | None, str | None]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_fantasy_rankings(csv_path: str = "data/fantasy_adp.xlsx") -> pd.DataFrame:
+    # ── Temporary debug — surface the real exception instead of swallowing it ──
     try:
         if csv_path.endswith((".xlsx", ".xls")):
             return pd.read_excel(csv_path)
         return pd.read_csv(csv_path)
-    except FileNotFoundError:
-        return pd.DataFrame()
-    except Exception:
+    except Exception as e:
+        st.error(f"debug: load_fantasy_rankings failed — {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 
