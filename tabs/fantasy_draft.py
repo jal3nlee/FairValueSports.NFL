@@ -35,17 +35,13 @@ def render():
     st.session_state.setdefault("fd_editor_version", 0)
     st.session_state.setdefault("fd_editor_row_ids", [])
 
-    # ── Compact toolbar: Scoring · Position · View, one row, tight gap ──
-    _c1, _c2, _c3 = st.columns([1.6, 3, 1.6], gap="small")
-    with _c1:
+    # ── Row 1: Scoring · View ──────────────────────────
+    _r1c1, _r1c2 = st.columns([1.6, 1.6], gap="small")
+    with _r1c1:
         _tight_label("Scoring")
         _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR",
                                          key="fd_scoring", label_visibility="collapsed") or "PPR"
-    with _c2:
-        _tight_label("Position")
-        _position = st.segmented_control("Position", POSITIONS, default="Overall",
-                                          key="fd_position", label_visibility="collapsed") or "Overall"
-    with _c3:
+    with _r1c2:
         _tight_label("View")
         _view = st.segmented_control("View", ["Consensus", "Best Available"], default="Consensus",
                                       key="fd_view", label_visibility="collapsed") or "Consensus"
@@ -59,13 +55,18 @@ def render():
         st.warning("Rankings data couldn't be processed. Check the file formatting.")
         return
 
-    # ── Platform filter — right below the toolbar, recomputes Avg ADP ──
-    _tight_label("Platforms")
-    _selected_platforms = st.multiselect(
-        "Platforms", options=platform_cols, default=platform_cols,
-        key="fd_platforms", label_visibility="collapsed",
-        placeholder="Select platforms to include...",
-    )
+    # ── Row 2: Position · Platforms ─────────────────────
+    _r2c1, _r2c2 = st.columns([1.6, 1.6], gap="small")
+    with _r2c1:
+        _tight_label("Position")
+        _position = st.selectbox("Position", POSITIONS, key="fd_position", label_visibility="collapsed")
+    with _r2c2:
+        _tight_label("Platforms")
+        _selected_platforms = st.multiselect(
+            "Platforms", options=platform_cols, default=platform_cols,
+            key="fd_platforms", label_visibility="collapsed",
+            placeholder="Select platforms to include...",
+        )
     if not _selected_platforms:
         st.warning("Select at least one platform.")
         return
@@ -115,9 +116,6 @@ def render():
         st.info("No players match the current filters, or all matching players have been drafted.")
         return
 
-    # ── Recompute Avg ADP off only the selected platforms — Rank stays
-    # the original consensus order (fixed at build time), only the
-    # displayed Avg ADP value reflects the current platform selection. ──
     _filtered = _filtered.copy()
     _filtered["AvgADP"] = calculate_consensus_adp(_filtered, _selected_platforms)
 
