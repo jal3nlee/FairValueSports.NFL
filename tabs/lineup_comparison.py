@@ -16,7 +16,7 @@ from core.lineup_data import (
 from core.nflverse_data import get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
-TREND_THRESHOLD = 0.15  # 15% change minimum before showing an arrow
+TREND_THRESHOLD = 0.15
 
 
 def _dash(v):
@@ -148,7 +148,7 @@ def render_usage_and_role(enriched_players: list[dict]):
     if len(positions) == 1:
         metrics = POSITION_METRICS.get(next(iter(positions)), [])
     else:
-        metrics = ["targets_per_game"]  # cross-position FLEX comparisons kept minimal
+        metrics = ["targets_per_game"]
 
     usage_by_player = {}
     for p in enriched_players:
@@ -234,7 +234,7 @@ def render(supabase, now_utc):
     _all_markets = sorted(set(m for p in enriched for m in p["props"].keys()))
     if _all_markets:
         st.markdown("### Player Props")
-        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for m in enriched]) for m in _all_markets]
+        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
 
     # ── Usage & Role (nflverse) ────────────────────────
