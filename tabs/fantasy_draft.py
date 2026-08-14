@@ -68,9 +68,6 @@ def render():
     if _view == "Biggest Disagreement":
         _filtered = _filtered.sort_values("Range", ascending=False, na_position="last").reset_index(drop=True)
     elif _view == "Best Available":
-        # Same order as Consensus for now — the drafted-player hide/track
-        # logic below is wired up so this becomes a real "who's left"
-        # view once live-draft tracking is built out.
         st.session_state.setdefault("fd_drafted_players", set())
         _drafted = st.multiselect(
             "Mark players as drafted (removes them from Best Available)",
