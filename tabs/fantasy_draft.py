@@ -57,6 +57,7 @@ def render():
         st.warning("Rankings data couldn't be processed. Check the file formatting.")
         return
 
+    _is_best_available = _view == "Best Available"
     _editor_key = f"fd_editor_{st.session_state.fd_editor_version}"
 
     def _apply_pending_drafts():
@@ -77,20 +78,20 @@ def render():
         st.session_state.fd_drafted_ids = set()
         st.session_state.fd_editor_version += 1
 
-    _reset_col, _update_col, _spacer = st.columns([1.1, 1.3, 3])
-    with _reset_col:
-        if st.button("Reset Draft Board", use_container_width=True, key="fd_reset_btn"):
-            _reset_board()
-            st.rerun()
-    with _update_col:
-        if st.button("Update Draft Board", type="primary", use_container_width=True, key="fd_update_btn"):
-            _apply_pending_drafts()
-            st.rerun()
+    if _is_best_available:
+        _reset_col, _update_col, _spacer = st.columns([1.1, 1.3, 3])
+        with _reset_col:
+            if st.button("Reset Draft Board", use_container_width=True, key="fd_reset_btn"):
+                _reset_board()
+                st.rerun()
+        with _update_col:
+            if st.button("Update Draft Board", type="primary", use_container_width=True, key="fd_update_btn"):
+                _apply_pending_drafts()
+                st.rerun()
 
-    # ── Base set depends on view — Consensus shows everyone (with drafted
-    # state visible via the checkbox), Best Available filters drafted out
-    # entirely. Neither ever renumbers ConsensusRank. ──────────────────
-    if _view == "Best Available":
+    # ── Base set depends on view — Consensus shows everyone, Best
+    # Available filters drafted out entirely. Neither renumbers ConsensusRank. ──
+    if _is_best_available:
         _base = df[~df["PlayerID"].isin(st.session_state.fd_drafted_ids)].reset_index(drop=True)
     else:
         _base = df
@@ -104,22 +105,23 @@ def render():
     def _fmt_player(row):
         return f"{row['Name']} — {row['Team']}" if row["Team"] else row["Name"]
 
-    _display = pd.DataFrame({
-        "Available": ~_filtered["PlayerID"].isin(st.session_state.fd_drafted_ids),
+    _display_data = {
         "Rank": _filtered["ConsensusRank"],
         "Player": _filtered.apply(_fmt_player, axis=1),
         "Pos": _filtered["Position"],
-    })
+    }
+    if _is_best_available:
+        # Only real when there's actually a checkbox to act on — in
+        # Consensus view there's no Update flow, so no Available column.
+        _display_data = {"Available": ~_filtered["PlayerID"].isin(st.session_state.fd_drafted_ids), **_display_data}
+    _display = pd.DataFrame(_display_data)
+
     for col in platform_cols:
         _display[col] = _filtered[col].apply(_fmt_missing)
     _display["Avg ADP"] = _filtered["AvgADP"].apply(_fmt_missing)
     _display["Bye"] = _filtered["Bye"].apply(lambda b: b if b else "—")
 
-    st.session_state["fd_editor_row_ids"] = _filtered["PlayerID"].tolist()
-
     _col_config = {
-        "Available": st.column_config.CheckboxColumn("AVAILABLE", width="small",
-                        help="Uncheck drafted players, then click Update Draft Board."),
         "Rank":       st.column_config.NumberColumn("RANK", width="small"),
         "Player":     st.column_config.TextColumn("PLAYER", width="large"),
         "Pos":        st.column_config.TextColumn("POS", width="small"),
@@ -129,14 +131,28 @@ def render():
     for col in platform_cols:
         _col_config[col] = st.column_config.TextColumn(col.upper(), width="small")
 
-    st.data_editor(
-        _display,
-        key=_editor_key,
-        use_container_width=True,
-        hide_index=True,
-        height=min(760, 46 + 35 * len(_display)),
-        column_config=_col_config,
-        disabled=[c for c in _display.columns if c != "Available"],
-    )
+    if _is_best_available:
+        _col_config["Available"] = st.column_config.CheckboxColumn(
+            "AVAILABLE", width="small", help="Uncheck drafted players, then click Update Draft Board.",
+        )
+        st.session_state["fd_editor_row_ids"] = _filtered["PlayerID"].tolist()
+        st.data_editor(
+            _display,
+            key=_editor_key,
+            use_container_width=True,
+            hide_index=True,
+            height=min(760, 46 + 35 * len(_display)),
+            column_config=_col_config,
+            disabled=[c for c in _display.columns if c != "Available"],
+        )
+    else:
+        # Consensus view is read-only — no checkbox, no editor, plain table.
+        st.dataframe(
+            _display,
+            use_container_width=True,
+            hide_index=True,
+            height=min(760, 46 + 35 * len(_display)),
+            column_config=_col_config,
+        )
 
     st.caption(f"ADP Sources: {' · '.join(platform_cols)}")
