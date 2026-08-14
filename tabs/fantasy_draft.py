@@ -122,7 +122,7 @@ def render():
     _filtered["AvgADP"] = calculate_consensus_adp(_filtered, _selected_platforms)
 
     def _fmt_player(row):
-        return f"{row['Name']} — {row['Team']}" if row["Team"] else row["Name"]
+        return f"{row['Name']} ({row['Team']})" if row["Team"] else row["Name"]
 
     _display_data = {
         "Rank": _filtered["ConsensusRank"],
