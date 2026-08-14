@@ -5,3 +5,4 @@ supabase>=2.4.0
 pillow
 streamlit-cookies-manager-v2
 openpyxl
+nflreadpy
