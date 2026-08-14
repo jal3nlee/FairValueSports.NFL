@@ -15,6 +15,13 @@ def _fmt_missing(v):
     return v
 
 
+def _tight_label(text: str):
+    st.markdown(
+        f"<div style='font-size:0.78rem;opacity:0.65;margin:0 0 2px 0;line-height:1'>{text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render():
     st.markdown("## Fantasy Draft")
     st.caption(
@@ -26,16 +33,20 @@ def render():
     st.session_state.setdefault("fd_editor_version", 0)
     st.session_state.setdefault("fd_editor_row_ids", [])
 
-    # ── Scoring + Position, one row ──────────────────────
-    _sc1, _sc2 = st.columns([1.6, 3])
-    with _sc1:
-        st.caption("Scoring")
+    # ── Compact toolbar: Scoring · Position · View, one row ──────
+    _c1, _c2, _c3 = st.columns([1.6, 3, 1.6])
+    with _c1:
+        _tight_label("Scoring")
         _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR",
                                          key="fd_scoring", label_visibility="collapsed") or "PPR"
-    with _sc2:
-        st.caption("Position")
+    with _c2:
+        _tight_label("Position")
         _position = st.segmented_control("Position", POSITIONS, default="Overall",
                                           key="fd_position", label_visibility="collapsed") or "Overall"
+    with _c3:
+        _tight_label("View")
+        _view = st.segmented_control("View", ["Consensus", "Best Available"], default="Consensus",
+                                      key="fd_view", label_visibility="collapsed") or "Consensus"
 
     raw = load_fantasy_rankings(scoring=_scoring)
     if raw.empty:
@@ -46,44 +57,47 @@ def render():
         st.warning("Rankings data couldn't be processed. Check the file formatting.")
         return
 
-    # ── Apply Update/Reset from the PREVIOUS render's staged edits ──
-    # (button code sits above the editor, but the editor's staged
-    # checkbox state from last run is already sitting in session_state
-    # before this script starts executing — that's what lets the
-    # button "read what was just unchecked" even though it renders first.)
     _editor_key = f"fd_editor_{st.session_state.fd_editor_version}"
-
-    _status_col, _reset_col, _update_col = st.columns([2.2, 1, 1.2])
 
     def _apply_pending_drafts():
         _edits = st.session_state.get(_editor_key, {}).get("edited_rows", {})
         _row_ids = st.session_state.get("fd_editor_row_ids", [])
         for _idx, _change in _edits.items():
-            if _change.get("Available") is False and _idx < len(_row_ids):
-                st.session_state.fd_drafted_ids.add(_row_ids[_idx])
-        st.session_state.fd_editor_version += 1  # force a fresh widget, discard stale edited_rows
+            if _idx >= len(_row_ids):
+                continue
+            _pid = _row_ids[_idx]
+            if "Available" in _change:
+                if _change["Available"] is False:
+                    st.session_state.fd_drafted_ids.add(_pid)
+                else:
+                    st.session_state.fd_drafted_ids.discard(_pid)
+        st.session_state.fd_editor_version += 1
 
     def _reset_board():
         st.session_state.fd_drafted_ids = set()
         st.session_state.fd_editor_version += 1
 
-    with _update_col:
-        if st.button("Update Draft Board", type="primary", use_container_width=True, key="fd_update_btn"):
-            _apply_pending_drafts()
-            st.rerun()
+    _reset_col, _update_col, _spacer = st.columns([1.1, 1.3, 3])
     with _reset_col:
         if st.button("Reset Draft Board", use_container_width=True, key="fd_reset_btn"):
             _reset_board()
             st.rerun()
+    with _update_col:
+        if st.button("Update Draft Board", type="primary", use_container_width=True, key="fd_update_btn"):
+            _apply_pending_drafts()
+            st.rerun()
 
-    # ── Drafted removed BEFORE position filter, per spec ─────────
-    _available_full = df[~df["PlayerID"].isin(st.session_state.fd_drafted_ids)].reset_index(drop=True)
-    _available = filter_fantasy_rankings(_available_full, _position)
+    # ── Base set depends on view — Consensus shows everyone (with drafted
+    # state visible via the checkbox), Best Available filters drafted out
+    # entirely. Neither ever renumbers ConsensusRank. ──────────────────
+    if _view == "Best Available":
+        _base = df[~df["PlayerID"].isin(st.session_state.fd_drafted_ids)].reset_index(drop=True)
+    else:
+        _base = df
 
-    with _status_col:
-        st.caption(f"{len(_available_full)} Available · {len(st.session_state.fd_drafted_ids)} Drafted")
+    _filtered = filter_fantasy_rankings(_base, _position)
 
-    if _available.empty:
+    if _filtered.empty:
         st.info("No players match the current filters, or all matching players have been drafted.")
         return
 
@@ -91,19 +105,17 @@ def render():
         return f"{row['Name']} — {row['Team']}" if row["Team"] else row["Name"]
 
     _display = pd.DataFrame({
-        "Available": True,  # everyone still visible is, by definition, currently available
-        "Rank": _available["ConsensusRank"],
-        "Player": _available.apply(_fmt_player, axis=1),
-        "Pos": _available["Position"],
+        "Available": ~_filtered["PlayerID"].isin(st.session_state.fd_drafted_ids),
+        "Rank": _filtered["ConsensusRank"],
+        "Player": _filtered.apply(_fmt_player, axis=1),
+        "Pos": _filtered["Position"],
     })
     for col in platform_cols:
-        _display[col] = _available[col].apply(_fmt_missing)
-    _display["Avg ADP"] = _available["AvgADP"].apply(_fmt_missing)
-    _display["Bye"] = _available["Bye"].apply(lambda b: b if b else "—")
+        _display[col] = _filtered[col].apply(_fmt_missing)
+    _display["Avg ADP"] = _filtered["AvgADP"].apply(_fmt_missing)
+    _display["Bye"] = _filtered["Bye"].apply(lambda b: b if b else "—")
 
-    # Row order for THIS render — stored so a later Update click can map
-    # edited_rows' integer indices back to a real player.
-    st.session_state["fd_editor_row_ids"] = _available["PlayerID"].tolist()
+    st.session_state["fd_editor_row_ids"] = _filtered["PlayerID"].tolist()
 
     _col_config = {
         "Available": st.column_config.CheckboxColumn("AVAILABLE", width="small",
