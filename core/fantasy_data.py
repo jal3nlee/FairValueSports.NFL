@@ -16,6 +16,12 @@ _PLAYER_FIELD_RE = re.compile(r"^(.*?)\s{2,}([A-Z]{2,4})\s*(?:\((\d+)\))?\s*$")
 _BYE_ONLY_RE = re.compile(r"^(.*?)\s*\((\d+)\)\s*$")
 _POS_RE = re.compile(r"^([A-Za-z]+?)(\d*)$")
 
+# Each scoring format lives on its own sheet in the workbook — and each
+# sheet genuinely has a different set of platform columns (PPR has all
+# six sources; Half PPR and Standard only have a few), not just different
+# numbers on the same columns.
+SHEET_NAME_MAP = {"PPR": "PPR", "Half PPR": "Half PPR", "Standard": "STD"}
+
 
 def get_platform_columns(raw_df: pd.DataFrame) -> list[str]:
     """Must be called on the ORIGINAL, un-cleaned dataframe — clean_fantasy_rankings
@@ -56,10 +62,11 @@ def _fmt_bye(bye) -> str | None:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_fantasy_rankings(csv_path: str = "data/fantasy_adp.xlsx") -> pd.DataFrame:
+def load_fantasy_rankings(scoring: str = "PPR", csv_path: str = "data/fantasy_adp.xlsx") -> pd.DataFrame:
     try:
         if csv_path.endswith((".xlsx", ".xls")):
-            return pd.read_excel(csv_path)
+            sheet = SHEET_NAME_MAP.get(scoring, scoring)
+            return pd.read_excel(csv_path, sheet_name=sheet)
         return pd.read_csv(csv_path)
     except Exception:
         return pd.DataFrame()
