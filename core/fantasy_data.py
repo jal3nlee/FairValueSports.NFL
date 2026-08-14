@@ -1,41 +1,22 @@
 # core/fantasy_data.py
-# Data loading/cleaning for the Fantasy Draft tab. Kept separate from the
-# UI on purpose — the source file can later be swapped for an API feed or
-# a database without tabs/fantasy_draft.py needing to change at all.
 import re
 import pandas as pd
 import streamlit as st
 
-# Columns in the source file that are NOT a ranking platform. Everything
-# else in the ORIGINAL file header is treated as a platform column
-# automatically — captured before any cleaning step adds derived fields
-# like Name/Team/Bye/Position, so those never get mistaken for a source.
 _META_COLS = {"Rank", "Player (Bye)", "POS", "AVG", "Real-Time"}
 
 _PLAYER_FIELD_RE = re.compile(r"^(.*?)\s{2,}([A-Z]{2,4})\s*(?:\((\d+)\))?\s*$")
 _BYE_ONLY_RE = re.compile(r"^(.*?)\s*\((\d+)\)\s*$")
 _POS_RE = re.compile(r"^([A-Za-z]+?)(\d*)$")
 
-# Each scoring format lives on its own sheet in the workbook — and each
-# sheet genuinely has a different set of platform columns (PPR has all
-# six sources; Half PPR and Standard only have a few), not just different
-# numbers on the same columns.
 SHEET_NAME_MAP = {"PPR": "PPR", "Half PPR": "Half PPR", "Standard": "STD"}
 
 
 def get_platform_columns(raw_df: pd.DataFrame) -> list[str]:
-    """Must be called on the ORIGINAL, un-cleaned dataframe — clean_fantasy_rankings
-    adds columns (Name, Team, Bye, Position, PositionRankRaw) that must never
-    be mistaken for ranking platforms."""
     return [c for c in raw_df.columns if c not in _META_COLS]
 
 
 def _parse_player_field(raw) -> tuple[str | None, str | None, str | None]:
-    """
-    Splits the combined "Player   TEAM (Bye)" field into (name, team, bye).
-    Returns (None, None, None) for a genuinely blank/NaN cell so callers
-    can drop that row entirely rather than ever rendering "nan".
-    """
     if raw is None or (isinstance(raw, float) and pd.isna(raw)):
         return None, None, None
     raw = str(raw).strip()
@@ -52,7 +33,6 @@ def _parse_player_field(raw) -> tuple[str | None, str | None, str | None]:
 
 
 def _fmt_bye(bye) -> str | None:
-    """Always a clean whole number as text — never '6.0'."""
     if bye is None or (isinstance(bye, float) and pd.isna(bye)):
         return None
     try:
@@ -77,7 +57,7 @@ def clean_fantasy_rankings(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
-    platform_cols = get_platform_columns(df)  # capture BEFORE adding any new columns
+    platform_cols = get_platform_columns(df)
 
     parsed = df["Player (Bye)"].apply(_parse_player_field)
     df["Name"] = [p[0] for p in parsed]
@@ -88,58 +68,39 @@ def clean_fantasy_rankings(df: pd.DataFrame) -> pd.DataFrame:
         lambda s: _POS_RE.match(s.strip()).groups() if _POS_RE.match(s.strip()) else ("", "")
     )
     df["Position"] = [p[0] for p in pos_parsed]
-    df["PositionRankRaw"] = [p[1] for p in pos_parsed]
 
     for col in platform_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Drop rows with no real player name at all — blank trailing rows in
-    # the source file, not actual players.
     df = df[df["Name"].notna() & (df["Name"].astype(str).str.strip() != "")]
-
     df = df.drop_duplicates(subset=["Name", "Team"], keep="first").reset_index(drop=True)
+
+    # Stable identity — this is what drafted-state tracking hangs off of.
+    # Never the dataframe's row index, which changes with every sort/filter.
+    df["PlayerID"] = df["Name"] + "|" + df["Team"].fillna("")
+
     return df
 
 
 def calculate_consensus_adp(df: pd.DataFrame, platform_cols: list[str]) -> pd.Series:
-    """Mean of available platform values only — a missing platform is never treated as 0."""
     return df[platform_cols].mean(axis=1, skipna=True).round(1)
 
 
-def calculate_position_rank(df: pd.DataFrame) -> pd.Series:
-    """Positional rank computed from consensus ADP within each position group.
-    Players with no valid platform data (AvgADP is NaN) get no positional
-    rank rather than crashing on an int cast."""
-    rank_within_pos = df.groupby("Position")["AvgADP"].rank(method="first")
-    rank_str = rank_within_pos.apply(lambda x: str(int(x)) if pd.notna(x) else "")
-    return df["Position"].fillna("") + rank_str
-
-
 def build_ranking_table(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Runs the full clean -> consensus -> position-rank pipeline once."""
     if raw_df.empty:
         return raw_df, []
-    platform_cols = get_platform_columns(raw_df)  # from the RAW file, not the cleaned one
+    platform_cols = get_platform_columns(raw_df)
     df = clean_fantasy_rankings(raw_df)
     if df.empty:
         return df, platform_cols
 
     df["AvgADP"] = calculate_consensus_adp(df, platform_cols)
-    df["PosRank"] = calculate_position_rank(df)
-
     df = df.sort_values("AvgADP", ascending=True, na_position="last").reset_index(drop=True)
-    df["ConsensusRank"] = df.index + 1
+    df["ConsensusRank"] = df.index + 1  # fixed at build time — never renumbered after drafting
     return df, platform_cols
 
 
-def filter_fantasy_rankings(df: pd.DataFrame, position: str = "Overall", search_text: str = "") -> pd.DataFrame:
-    out = df
+def filter_fantasy_rankings(df: pd.DataFrame, position: str = "Overall") -> pd.DataFrame:
     if position and position != "Overall":
-        out = out[out["Position"] == position]
-    if search_text and search_text.strip():
-        q = search_text.strip().lower()
-        out = out[
-            out["Name"].str.lower().str.contains(q, na=False)
-            | out["Team"].fillna("").str.lower().str.contains(q, na=False)
-        ]
-    return out.reset_index(drop=True)
+        return df[df["Position"] == position].reset_index(drop=True)
+    return df.reset_index(drop=True)
