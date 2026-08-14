@@ -13,8 +13,10 @@ from core.lineup_data import (
     POSITIONS,
     FLEX_POSITIONS,
 )
+from core.nflverse_data import get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
+TREND_THRESHOLD = 0.15  # 15% change minimum before showing an arrow
 
 
 def _dash(v):
@@ -124,6 +126,58 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
     return None
 
 
+def _trend_str(season, current):
+    if season is None or current is None or season == 0:
+        return ""
+    change = (current - season) / season
+    if abs(change) < TREND_THRESHOLD:
+        return ""
+    return " ↑" if change > 0 else " ↓"
+
+
+def _fmt_usage_val(v, is_percent):
+    if v is None:
+        return "—"
+    return f"{v * 100:.0f}%" if is_percent else f"{v:.1f}"
+
+
+def render_usage_and_role(enriched_players: list[dict]):
+    st.markdown("### Usage & Role")
+
+    positions = {p["position"] for p in enriched_players}
+    if len(positions) == 1:
+        metrics = POSITION_METRICS.get(next(iter(positions)), [])
+    else:
+        metrics = ["targets_per_game"]  # cross-position FLEX comparisons kept minimal
+
+    usage_by_player = {}
+    for p in enriched_players:
+        usage_by_player[p["name"]] = get_player_usage(p["name"], p["team"], p["position"])
+
+    if not any(usage_by_player.values()):
+        st.info("Usage data temporarily unavailable.")
+        return {}
+
+    rows = []
+    for m in metrics:
+        label = METRIC_LABELS.get(m, m)
+        is_pct = m in PERCENT_METRICS
+        season_row = [label + " (Season)"]
+        role_row = [label + " (Current Role)"]
+        for p in enriched_players:
+            u = usage_by_player.get(p["name"], {}).get(m, {})
+            season_v, current_v = u.get("season"), u.get("current_role")
+            season_row.append(_fmt_usage_val(season_v, is_pct))
+            role_row.append(_fmt_usage_val(current_v, is_pct) + _trend_str(season_v, current_v))
+        rows.append(season_row)
+        rows.append(role_row)
+
+    cols = ["Metric"] + [p["name"] for p in enriched_players]
+    st.dataframe(pd.DataFrame(rows, columns=cols), use_container_width=True, hide_index=True)
+    st.caption("Usage data: nflverse")
+    return usage_by_player
+
+
 def render(supabase, now_utc):
     st.markdown("## Lineup Comparison")
     st.caption("Compare fantasy projections, player props, game environment, and matchup context side by side.")
@@ -180,8 +234,11 @@ def render(supabase, now_utc):
     _all_markets = sorted(set(m for p in enriched for m in p["props"].keys()))
     if _all_markets:
         st.markdown("### Player Props")
-        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
+        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for m in enriched]) for m in _all_markets]
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
+
+    # ── Usage & Role (nflverse) ────────────────────────
+    usage_by_player = render_usage_and_role(enriched)
 
     # ── Game Environment ──────────────────────────────
     _has_env = any(p["context"] for p in enriched)
@@ -200,5 +257,16 @@ def render(supabase, now_utc):
 
     # ── Key Differences ───────────────────────────────
     st.markdown("### Key Differences")
-    for note in generate_key_differences(enriched):
+    notes = generate_key_differences(enriched)
+    for p in enriched:
+        u = usage_by_player.get(p["name"], {})
+        for metric_key, meta in u.items():
+            if not isinstance(meta, dict):
+                continue
+            season_v, current_v = meta.get("season"), meta.get("current_role")
+            if season_v and current_v and abs((current_v - season_v) / season_v) >= TREND_THRESHOLD:
+                direction = "risen" if current_v > season_v else "declined"
+                label = METRIC_LABELS.get(metric_key, metric_key).lower()
+                notes.append(f"{p['name']}'s {label} has {direction} recently ({season_v} → {current_v}).")
+    for note in notes[:6]:
         st.markdown(f"- {note}")
