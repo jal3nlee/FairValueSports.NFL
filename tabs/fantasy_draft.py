@@ -2,17 +2,12 @@
 import streamlit as st
 import pandas as pd
 
-from core.fantasy_data import (
-    load_fantasy_rankings,
-    build_ranking_table,
-    filter_fantasy_rankings,
-)
+from core.fantasy_data import load_fantasy_rankings, build_ranking_table, filter_fantasy_rankings
 
 POSITIONS = ["Overall", "QB", "RB", "WR", "TE", "K", "DST"]
 
 
 def _fmt_missing(v):
-    """Never show NaN/None — always a clean value or an em dash."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return "—"
     if isinstance(v, float) and v == int(v):
@@ -22,89 +17,114 @@ def _fmt_missing(v):
 
 def render():
     st.markdown("## Fantasy Draft")
+    st.caption(
+        "Compare fantasy football draft rankings and ADP across ESPN, Sleeper, CBS, NFL, RTSports, "
+        "and Fantrax in one place."
+    )
 
-    _scoring = st.segmented_control(
-        "Scoring", ["PPR", "Half PPR", "Standard"], default="PPR", key="fd_scoring",
-    ) or "PPR"
+    st.session_state.setdefault("fd_drafted_ids", set())
+    st.session_state.setdefault("fd_editor_version", 0)
+    st.session_state.setdefault("fd_editor_row_ids", [])
+
+    # ── Scoring + Position, one row ──────────────────────
+    _sc1, _sc2 = st.columns([1.6, 3])
+    with _sc1:
+        st.caption("Scoring")
+        _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR",
+                                         key="fd_scoring", label_visibility="collapsed") or "PPR"
+    with _sc2:
+        st.caption("Position")
+        _position = st.segmented_control("Position", POSITIONS, default="Overall",
+                                          key="fd_position", label_visibility="collapsed") or "Overall"
 
     raw = load_fantasy_rankings(scoring=_scoring)
     if raw.empty:
-        st.info(
-            "No fantasy rankings data found. Add the ADP file to the repo at "
-            "`data/fantasy_adp.xlsx` to populate this tab."
-        )
+        st.info("No fantasy rankings data found. Add the ADP file to the repo at `data/fantasy_adp.xlsx`.")
         return
-
     df, platform_cols = build_ranking_table(raw)
     if df.empty:
         st.warning("Rankings data couldn't be processed. Check the file formatting.")
         return
 
-    st.caption(
-        f"Compare fantasy football draft rankings and ADP across "
-        f"{', '.join(platform_cols)} in one place."
-    )
+    # ── Apply Update/Reset from the PREVIOUS render's staged edits ──
+    # (button code sits above the editor, but the editor's staged
+    # checkbox state from last run is already sitting in session_state
+    # before this script starts executing — that's what lets the
+    # button "read what was just unchecked" even though it renders first.)
+    _editor_key = f"fd_editor_{st.session_state.fd_editor_version}"
 
-    # ── One-row toolbar: position filters left, search right ──────
-    _tb1, _tb2 = st.columns([3, 1.3])
-    with _tb1:
-        _position = st.segmented_control("Position", POSITIONS, default="Overall", key="fd_position") or "Overall"
-    with _tb2:
-        _search = st.text_input(
-            "Search player or team...", key="fd_search",
-            label_visibility="collapsed", placeholder="Search player or team...",
-        )
+    _status_col, _reset_col, _update_col = st.columns([2.2, 1, 1.2])
 
-    _view = st.segmented_control("View", ["Consensus", "Best Available"], default="Consensus", key="fd_view") or "Consensus"
+    def _apply_pending_drafts():
+        _edits = st.session_state.get(_editor_key, {}).get("edited_rows", {})
+        _row_ids = st.session_state.get("fd_editor_row_ids", [])
+        for _idx, _change in _edits.items():
+            if _change.get("Available") is False and _idx < len(_row_ids):
+                st.session_state.fd_drafted_ids.add(_row_ids[_idx])
+        st.session_state.fd_editor_version += 1  # force a fresh widget, discard stale edited_rows
 
-    _filtered = filter_fantasy_rankings(df, _position, _search)
+    def _reset_board():
+        st.session_state.fd_drafted_ids = set()
+        st.session_state.fd_editor_version += 1
 
-    if _view == "Best Available":
-        # Same ordering as Consensus for now — architecture ready for
-        # drafted-player removal once live-draft tracking is built.
-        st.session_state.setdefault("fd_drafted_players", set())
-        _drafted = st.multiselect(
-            "Mark players as drafted", options=sorted(df["Name"].tolist()),
-            key="fd_drafted_players_select", label_visibility="collapsed",
-            placeholder="Mark players as drafted...",
-        )
-        st.session_state["fd_drafted_players"] = set(_drafted)
-        _filtered = _filtered[~_filtered["Name"].isin(st.session_state["fd_drafted_players"])]
-        _filtered = _filtered.sort_values("AvgADP", ascending=True, na_position="last").reset_index(drop=True)
+    with _update_col:
+        if st.button("Update Draft Board", type="primary", use_container_width=True, key="fd_update_btn"):
+            _apply_pending_drafts()
+            st.rerun()
+    with _reset_col:
+        if st.button("Reset Draft Board", use_container_width=True, key="fd_reset_btn"):
+            _reset_board()
+            st.rerun()
 
-    if _filtered.empty:
-        st.info("No players match the current filters.")
+    # ── Drafted removed BEFORE position filter, per spec ─────────
+    _available_full = df[~df["PlayerID"].isin(st.session_state.fd_drafted_ids)].reset_index(drop=True)
+    _available = filter_fantasy_rankings(_available_full, _position)
+
+    with _status_col:
+        st.caption(f"{len(_available_full)} Available · {len(st.session_state.fd_drafted_ids)} Drafted")
+
+    if _available.empty:
+        st.info("No players match the current filters, or all matching players have been drafted.")
         return
 
     def _fmt_player(row):
-        loc = row["Team"] or ""
-        if row["Bye"]:
-            loc = f"{loc} ({row['Bye']})" if loc else f"({row['Bye']})"
-        return f"{row['Name']} — {loc}" if loc else row["Name"]
+        return f"{row['Name']} — {row['Team']}" if row["Team"] else row["Name"]
 
     _display = pd.DataFrame({
-        "Rank": _filtered["ConsensusRank"],
-        "Player": _filtered.apply(_fmt_player, axis=1),
-        "Pos": _filtered["PosRank"],
+        "Available": True,  # everyone still visible is, by definition, currently available
+        "Rank": _available["ConsensusRank"],
+        "Player": _available.apply(_fmt_player, axis=1),
+        "Pos": _available["Position"],
     })
     for col in platform_cols:
-        _display[col] = _filtered[col].apply(_fmt_missing)
-    _display["Avg ADP"] = _filtered["AvgADP"].apply(_fmt_missing)
+        _display[col] = _available[col].apply(_fmt_missing)
+    _display["Avg ADP"] = _available["AvgADP"].apply(_fmt_missing)
+    _display["Bye"] = _available["Bye"].apply(lambda b: b if b else "—")
+
+    # Row order for THIS render — stored so a later Update click can map
+    # edited_rows' integer indices back to a real player.
+    st.session_state["fd_editor_row_ids"] = _available["PlayerID"].tolist()
 
     _col_config = {
-        "Rank":    st.column_config.NumberColumn("RANK", width="small"),
-        "Player":  st.column_config.TextColumn("PLAYER", width="large"),
-        "Pos":     st.column_config.TextColumn("POS", width="small"),
-        "Avg ADP": st.column_config.TextColumn("AVG ADP", width="small"),
+        "Available": st.column_config.CheckboxColumn("AVAILABLE", width="small",
+                        help="Uncheck drafted players, then click Update Draft Board."),
+        "Rank":       st.column_config.NumberColumn("RANK", width="small"),
+        "Player":     st.column_config.TextColumn("PLAYER", width="large"),
+        "Pos":        st.column_config.TextColumn("POS", width="small"),
+        "Avg ADP":    st.column_config.TextColumn("AVG ADP", width="small"),
+        "Bye":        st.column_config.TextColumn("BYE", width="small"),
     }
     for col in platform_cols:
         _col_config[col] = st.column_config.TextColumn(col.upper(), width="small")
 
-    st.dataframe(
+    st.data_editor(
         _display,
+        key=_editor_key,
         use_container_width=True,
         hide_index=True,
         height=min(760, 46 + 35 * len(_display)),
         column_config=_col_config,
+        disabled=[c for c in _display.columns if c != "Available"],
     )
+
     st.caption(f"ADP Sources: {' · '.join(platform_cols)}")
