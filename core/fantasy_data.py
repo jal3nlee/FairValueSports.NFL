@@ -46,13 +46,11 @@ def _parse_player_field(raw: str) -> tuple[str, str | None, str | None]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_fantasy_rankings(csv_path: str = "data/fantasy_adp.xlsx") -> pd.DataFrame:
-    # ── Temporary debug — surface the real exception instead of swallowing it ──
     try:
         if csv_path.endswith((".xlsx", ".xls")):
             return pd.read_excel(csv_path)
         return pd.read_csv(csv_path)
-    except Exception as e:
-        st.error(f"debug: load_fantasy_rankings failed — {type(e).__name__}: {e}")
+    except Exception:
         return pd.DataFrame()
 
 
@@ -96,9 +94,12 @@ def calculate_platform_range(df: pd.DataFrame, platform_cols: list[str]) -> pd.S
 def calculate_position_rank(df: pd.DataFrame) -> pd.Series:
     """Positional rank computed from consensus ADP within each position group —
     independent of the CSV's own POS numbering, so it stays correct even
-    if the file is filtered or a future source numbers things differently."""
-    rank_within_pos = df.groupby("Position")["AvgADP"].rank(method="first").astype(int)
-    return df["Position"] + rank_within_pos.astype(str)
+    if the file is filtered or a future source numbers things differently.
+    Players with no valid platform data at all (AvgADP is NaN) get no
+    positional rank rather than crashing the whole page."""
+    rank_within_pos = df.groupby("Position")["AvgADP"].rank(method="first")
+    rank_str = rank_within_pos.apply(lambda x: str(int(x)) if pd.notna(x) else "")
+    return df["Position"].fillna("") + rank_str
 
 
 def disagreement_thresholds(df: pd.DataFrame) -> tuple[float, float]:
