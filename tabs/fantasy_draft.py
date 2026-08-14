@@ -23,7 +23,11 @@ def _fmt_missing(v):
 def render():
     st.markdown("## Fantasy Draft")
 
-    raw = load_fantasy_rankings()
+    _scoring = st.segmented_control(
+        "Scoring", ["PPR", "Half PPR", "Standard"], default="PPR", key="fd_scoring",
+    ) or "PPR"
+
+    raw = load_fantasy_rankings(scoring=_scoring)
     if raw.empty:
         st.info(
             "No fantasy rankings data found. Add the ADP file to the repo at "
