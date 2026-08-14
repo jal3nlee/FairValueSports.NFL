@@ -3,5 +3,5 @@ pandas
 requests
 supabase>=2.4.0 
 pillow
-streamlit-cookies-manager
+streamlit-cookies-manager-v2
 openpyxl
