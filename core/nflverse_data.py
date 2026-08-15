@@ -27,19 +27,37 @@ METRIC_LABELS = {
     "passing_yards_per_game":  "Passing Yards / Game",
     "receptions_per_game":     "Receptions / Game",
     "rush_yards_per_game":     "Rushing Yards / Game",
+    "passing_tds_per_game":    "Passing TDs / Game",
 }
 PERCENT_METRICS = {"target_share", "carry_share"}
 
-# Lineup Analysis uses a wider, transparent-sample metric set (Season /
-# Last 5 / Last 3) rather than the Current Role recency-weighted number —
-# kept separate from POSITION_METRICS above since Prop Leaderboard's
-# Player Search view still uses that narrower set unchanged.
 LINEUP_USAGE_METRICS = {
     "WR": ["targets_per_game", "target_share", "receptions_per_game", "receiving_yards_per_game"],
     "TE": ["targets_per_game", "target_share", "receptions_per_game", "receiving_yards_per_game"],
     "RB": ["carries_per_game", "carry_share", "targets_per_game", "receptions_per_game", "rush_yards_per_game"],
     "QB": ["attempts_per_game", "passing_yards_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
 }
+
+# The player card's season-stat row — a smaller, position-specific set,
+# separate from LINEUP_USAGE_METRICS above (which stays exactly as-is,
+# unchanged, for the Usage & Role table). Same underlying calculation
+# engine (get_usage_samples), just a different metric list passed in.
+CARD_SEASON_METRICS = {
+    "QB": ["passing_yards_per_game", "passing_tds_per_game", "rush_yards_per_game"],
+    "RB": ["carries_per_game", "rush_yards_per_game", "targets_per_game"],
+    "WR": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game"],
+    "TE": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game"],
+}
+CARD_METRIC_LABELS = {
+    "passing_yards_per_game":   "Pass Yds/G",
+    "passing_tds_per_game":     "Pass TD/G",
+    "rush_yards_per_game":      "Rush Yds/G",
+    "carries_per_game":         "Car/G",
+    "targets_per_game":         "Tgt/G",
+    "receptions_per_game":      "Rec/G",
+    "receiving_yards_per_game": "Rec Yds/G",
+}
+
 _METRIC_FIELD = {
     "targets_per_game": "targets",
     "target_share": "target_share",
@@ -51,6 +69,7 @@ _METRIC_FIELD = {
     "attempts_per_game": "attempts",
     "passing_yards_per_game": "passing_yards",
     "rush_attempts_per_game": "carries",
+    "passing_tds_per_game": "passing_tds",
 }
 
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
@@ -162,7 +181,6 @@ def get_current_season() -> int:
 
 
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
-    """Kept for internal/backtesting use only — not shown to end users on Lineup Analysis."""
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if not pairs:
         return None
@@ -177,7 +195,6 @@ def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
 
 
 def blend_prior_season(current_value, prior_value, games_played: int, continuity: bool = True):
-    """Kept for internal/backtesting use only — not shown to end users on Lineup Analysis."""
     if current_value is None and prior_value is None:
         return None
     if not continuity or prior_value is None or games_played >= _BLEND_FLOOR_GAMES:
@@ -189,8 +206,6 @@ def blend_prior_season(current_value, prior_value, games_played: int, continuity
 
 
 def _build_weekly_rows(player_stats, team_stats, player_name: str, team_abbr: str):
-    """Returns this player's games, sorted OLDEST -> NEWEST — the ordering
-    every window slice (season/last5/last3) below relies on."""
     if player_stats is None:
         return []
     try:
@@ -228,9 +243,6 @@ def _team_abbr_for(team_full_name: str, teams_df) -> str | None:
 
 
 def get_player_usage(player_name: str, team_full_name: str, position: str, prior_team_full_name: str | None = None) -> dict:
-    """Current-Role (recency-weighted, prior-season-blended) calculation —
-    still used by Prop Leaderboard's Player Search view. NOT used by
-    Lineup Analysis, which shows transparent Season/Last5/Last3 instead."""
     if not _NFLVERSE_AVAILABLE:
         return {}
     try:
@@ -294,13 +306,16 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
         return {}
 
 
-def get_usage_samples(player_name: str, team_full_name: str, position: str) -> dict:
+def get_usage_samples(player_name: str, team_full_name: str, position: str, metrics: list[str] | None = None) -> dict:
     """
-    Lineup Analysis's Usage & Role source — transparent Season / Last 5 /
-    Last 3 windows, CURRENT SEASON ONLY, no prior-season blending, no
-    recency weighting. Each window reports both the averaged value AND
-    how many actual games went into it, so a 3-game "Last 5" is never
-    presented as if it were a real 5-game sample.
+    Transparent Season / Last 5 / Last 3 windows — CURRENT SEASON ONLY,
+    no prior-season blending, no recency weighting. Each window reports
+    both the averaged value AND how many actual games went into it.
+
+    metrics: optional override list of metric keys to compute — defaults
+    to LINEUP_USAGE_METRICS[position] (the Usage & Role table's set,
+    unchanged behavior). The player card passes CARD_SEASON_METRICS
+    instead, reusing this exact same calculation, not a separate one.
     """
     if not _NFLVERSE_AVAILABLE:
         return {}
@@ -317,10 +332,10 @@ def get_usage_samples(player_name: str, team_full_name: str, position: str) -> d
             return {}
 
         windows = {"season": rows, "last5": rows[-5:], "last3": rows[-3:]}
-        metrics = LINEUP_USAGE_METRICS.get(position, [])
+        metric_list = metrics if metrics is not None else LINEUP_USAGE_METRICS.get(position, [])
 
         result = {"games_played": len(rows)}
-        for m in metrics:
+        for m in metric_list:
             field = _METRIC_FIELD.get(m)
             entry = {}
             for wname, wrows in windows.items():
@@ -332,8 +347,30 @@ def get_usage_samples(player_name: str, team_full_name: str, position: str) -> d
         return {}
 
 
+def get_card_season_stats(player_name: str, team_full_name: str, position: str) -> list[dict]:
+    """
+    The player card's 3-stat season snapshot — reuses get_usage_samples's
+    exact same season-averaging code, just a smaller position-specific
+    metric list (CARD_SEASON_METRICS). Returns [] if the player has no
+    current-season games at all (card should omit the stat row entirely,
+    never show fake 0.0s).
+    """
+    metric_list = CARD_SEASON_METRICS.get(position, [])
+    if not metric_list:
+        return []
+    samples = get_usage_samples(player_name, team_full_name, position, metrics=metric_list)
+    if not samples or samples.get("games_played", 0) == 0:
+        return []
+    out = []
+    for m in metric_list:
+        season_val = samples.get(m, {}).get("season", {}).get("value")
+        if season_val is None:
+            continue
+        out.append({"label": CARD_METRIC_LABELS.get(m, m), "value": season_val})
+    return out
+
+
 def get_recent_games(player_name: str, team_full_name: str, position: str, n: int = 5) -> list[dict]:
-    """Position-specific game-level rows, most recent first — current season only."""
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
