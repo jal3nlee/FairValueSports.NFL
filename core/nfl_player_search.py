@@ -7,7 +7,7 @@ import streamlit as st
 from core.lineup_data import get_players_by_team, get_players_by_position, NFL_TEAMS
 
 _POSITION_ORDER = {"QB": 0, "RB": 1, "WR": 2, "TE": 3, "K": 4, "DST": 5}
-DEFAULT_NFL_TEAM = sorted(NFL_TEAMS.keys())[0]  # "Arizona Cardinals" — first alphabetically, centralized here
+DEFAULT_NFL_TEAM = sorted(NFL_TEAMS.keys())[0]
 
 
 def _sort_key(p: dict):
@@ -23,13 +23,7 @@ def render_nfl_player_search(
     Renders the standardized Team | Position | Player controls and returns
     the selected player as {"name", "team", "position", "headshot_url"},
     or None if no eligible player exists for the current Team/Position.
-
-    allowed_positions restricts the Position dropdown's non-"All" options
-    (and, when Position="All", which positions are actually eligible) —
-    e.g. ["QB","RB","WR","TE"] for skill-position tools. Defaults to those
-    four if not given, since no current NFL tool needs K/DST.
-    taken_names excludes already-selected players (for multi-player
-    comparisons where duplicates aren't allowed).
+    Dropdown label format: "Player Name (Position)".
     """
     allowed_positions = allowed_positions or ["QB", "RB", "WR", "TE"]
     taken_names = taken_names or set()
@@ -67,7 +61,7 @@ def render_nfl_player_search(
             st.selectbox("Player", ["No eligible players"], key=f"{key_prefix}_player_empty",
                          label_visibility="collapsed", disabled=True)
             return None
-        _labels = {f"{p['name']} — {p['position']}": p for p in roster}
+        _labels = {f"{p['name']} ({p['position']})": p for p in roster}
         _picked_label = st.selectbox(
             "Player", list(_labels.keys()), key=f"{key_prefix}_player", label_visibility="collapsed",
         )
