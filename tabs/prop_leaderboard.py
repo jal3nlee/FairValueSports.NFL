@@ -8,7 +8,7 @@ from core.prop_hit_rate_dashboard import render_prop_hit_rate_dashboard
 from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
-    build_prop_leaderboard, get_player_game_log,
+    build_prop_leaderboard, get_player_game_log, get_current_season,
     get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS,
 )
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
@@ -46,9 +46,6 @@ def _opponent_for(team_abbr: str, supabase, now_utc):
         return "—"
 
 
-# =======================
-# LEADERBOARD SUBVIEW — unchanged
-# =======================
 def render_leaderboard_view(supabase, now_utc):
     _c1, _c2, _c3, _c4 = st.columns([1.8, 1.2, 1.2, 1.6])
     with _c1:
@@ -61,7 +58,6 @@ def render_leaderboard_view(supabase, now_utc):
         sample_label = st.selectbox("Sample", list(SAMPLE_OPTIONS.keys()), index=1, key="pl_sample")
 
     _run = st.button("Find Top 10", type="primary", key="pl_run")
-
     st.markdown(f"### {side} {line:g} {stat_label}")
     st.caption(sample_label)
 
@@ -97,9 +93,6 @@ def render_leaderboard_view(supabase, now_utc):
         st.caption("Pushes (exact line matches) are excluded from both hits and the sample denominator.")
 
 
-# =======================
-# PLAYER SEARCH SUBVIEW
-# =======================
 def render_player_search_view(supabase, now_utc):
     st.markdown("### Player Search")
     player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
@@ -108,8 +101,6 @@ def render_player_search_view(supabase, now_utc):
         return
 
     ctx = get_team_game_context(supabase, player["team"], now_utc)
-
-    # ── Full-width MLB-style player card ──────────────
     render_nfl_player_card(player, ctx, compact=False)
 
     st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
@@ -121,11 +112,10 @@ def render_player_search_view(supabase, now_utc):
         st.info("No supported prop stats for this position.")
         return
 
-    # ── Row 1: Stat | Prop Line | Sample ──────────────
     _r1c1, _r1c2, _r1c3 = st.columns([1.6, 1.0, 1.4], gap="small")
     with _r1c1:
-        st.caption("Stat")
-        _picked_label = st.selectbox("Stat", _available, key="ps_stat_pick", label_visibility="collapsed")
+        st.caption("Prop")
+        _picked_label = st.selectbox("Prop", _available, key="ps_stat_pick", label_visibility="collapsed")
     stat_field = PROP_STAT_MAP.get(_picked_label) or PLAYER_SEARCH_EXTRA_STATS.get(_picked_label)
 
     odds_market_key = PROP_LABEL_TO_ODDS_MARKET.get(_picked_label)
@@ -143,14 +133,12 @@ def render_player_search_view(supabase, now_utc):
             step=0.5, key="ps_threshold", label_visibility="collapsed",
         )
     with _r1c3:
-        st.caption("Sample")
+        st.caption("Sample Size")
         _sample_label = st.selectbox(
-            "Sample", ["Last 5 Games", "Last 10 Games", "Season"], index=1,
+            "Sample Size", ["Last 5 Games", "Last 10 Games", "Season"], index=1,
             key="ps_sample", label_visibility="collapsed",
         )
 
-    # ── Row 2: Side, its own row ───────────────────────
-    st.caption("Side")
     _side_col, _ = st.columns([1.0, 3.0])
     with _side_col:
         _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
@@ -158,7 +146,6 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    # ── Current Market ─────────────────────────────────
     st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 2px 0'>Current Market</div>", unsafe_allow_html=True)
     if not odds_market_key:
         st.caption(f"{_picked_label} isn't tracked by sportsbooks — research the line above manually.")
@@ -183,7 +170,6 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Prop Hit Rate — shared dashboard, same engine as Leaderboard ──
     st.markdown("## Prop Hit Rate")
     st.caption("See how often this player has cleared the selected prop line.")
 
@@ -191,24 +177,27 @@ def render_player_search_view(supabase, now_utc):
     _full_log = get_player_game_log(player["name"], player["team"], stat_field, n_games=None)
     _dashboard_log = _full_log[:_sample_n] if _sample_n else _full_log
 
-    render_prop_hit_rate_dashboard(_picked_label, _side, _threshold, _dashboard_log, _sample_label)
+    render_prop_hit_rate_dashboard(
+        _picked_label, _side, _threshold, _dashboard_log, _sample_label,
+        current_season=get_current_season(),
+    )
 
     if _full_log:
         st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
         st.markdown("### Recent Results")
         st.caption("Line = your selected research line, not a historical sportsbook line.")
-        _log_rows = [
-            {
-                "Week": g["week"], "Opponent": g["opponent"], _picked_label: g["value"], "Line": _threshold,
+        _cur_season = get_current_season()
+        _log_rows = []
+        for g in _full_log[:10]:
+            _wk = f"W{g['week']}" if g.get("season") == _cur_season else f"W{g['week']} {g.get('season')}"
+            _log_rows.append({
+                "Week": _wk, "Opponent": g["opponent"], _picked_label: g["value"], "Line": _threshold,
                 "Result": ("Over" if g["value"] > _threshold else "Push" if g["value"] == _threshold else "Under"),
-            }
-            for g in _full_log[:10]
-        ]
+            })
         st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Usage & Role ────────────────────────────────────
     st.markdown("### Usage & Role")
     usage = get_player_usage(player["name"], player["team"], player["position"])
     metrics = POSITION_METRICS.get(player["position"], [])
