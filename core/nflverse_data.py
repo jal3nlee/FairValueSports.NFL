@@ -31,20 +31,9 @@ PERCENT_METRICS = {"target_share", "carry_share"}
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
 _BLEND_FLOOR_GAMES = 6
 
-MARKET_TO_STAT_FIELD = {
-    "player_pass_yds": "passing_yards",
-    "player_pass_tds": "passing_tds",
-    "player_pass_interceptions": "passing_interceptions",
-    "player_pass_attempts": "attempts",
-    "player_pass_completions": "completions",
-    "player_rush_yds": "rushing_yards",
-    "player_rush_attempts": "carries",
-    "player_reception_yds": "receiving_yards",
-    "player_receptions": "receptions",
-    "player_anytime_td": "_any_td",
-}
-
-# ── Prop Leaderboard: stat -> nflverse column, and stat -> eligible positions ──
+# ── Single shared prop vocabulary — used by BOTH the Leaderboard and
+# Player Search subviews, so a stat resolves to the exact same nflverse
+# column no matter which workflow the user came in through. ──────────
 PROP_STAT_MAP = {
     "Passing Yards":     "passing_yards",
     "Passing TDs":       "passing_tds",
@@ -76,13 +65,38 @@ PROP_AVG_LABEL = {
     "Pass Attempts":    "Avg Pass Att",
     "Completions":      "Avg Completions",
     "Rushing Yards":    "Avg Rush Yds",
-    "Rushing Attempts": "Avg Rush Att",
+    "Rushing Attempts": "Avg Carries",
     "Receiving Yards":  "Avg Rec Yds",
-    "Receptions":       "Avg Receptions",
+    "Receptions":       "Avg Rec",
     "Targets":          "Avg Targets",
 }
 SAMPLE_OPTIONS = {"Last 3 Games": 3, "Last 5 Games": 5, "Last 10 Games": 10, "Season": None}
 _SEASON_MIN_GAMES = 3
+
+# Player Search only — Anytime TD has no reliable single nflverse column
+# (it's derived from three TD types combined), and isn't part of the
+# core shared vocabulary the Leaderboard uses, so it's kept separate
+# rather than forced into PROP_STAT_MAP.
+PLAYER_SEARCH_EXTRA_STATS = {"Anytime TD": "_any_td"}
+
+# Bridges PROP_STAT_MAP's labels to The Odds API's market keys — a
+# genuinely different vocabulary (a betting market, not a stat column),
+# used only for pulling CURRENT sportsbook lines in Player Search.
+# None = no sportsbook market exists for that stat (historical research
+# still works, there's just nothing to show under "Current Market").
+PROP_LABEL_TO_ODDS_MARKET = {
+    "Passing Yards":    "player_pass_yds",
+    "Passing TDs":      "player_pass_tds",
+    "Interceptions":    "player_pass_interceptions",
+    "Pass Attempts":    "player_pass_attempts",
+    "Completions":      "player_pass_completions",
+    "Rushing Yards":    "player_rush_yds",
+    "Rushing Attempts": "player_rush_attempts",
+    "Receiving Yards":  "player_reception_yds",
+    "Receptions":       "player_receptions",
+    "Targets":          None,
+    "Anytime TD":       "player_anytime_td",
+}
 
 
 def _norm_name(name: str) -> str:
@@ -260,7 +274,13 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
         return {}
 
 
-def get_player_game_log(player_name: str, team_full_name: str, market_key: str, n_games: int = 10) -> list[dict]:
+def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, n_games: int | None = 10) -> list[dict]:
+    """
+    stat_field is an nflverse column name (from PROP_STAT_MAP's values, or
+    "_any_td" for the Player-Search-only Anytime TD derivation) — the SAME
+    field vocabulary the Leaderboard uses, so both subviews read identical
+    underlying numbers. Pass n_games=None for the full season.
+    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
@@ -276,16 +296,15 @@ def get_player_game_log(player_name: str, team_full_name: str, market_key: str, 
         if not rows:
             return []
 
-        field = MARKET_TO_STAT_FIELD.get(market_key)
         out = []
         for r in rows:
-            if field == "_any_td":
+            if stat_field == "_any_td":
                 rush_td = r.get("rushing_tds") or 0
                 rec_td = r.get("receiving_tds") or 0
                 pass_td = r.get("passing_tds") or 0
                 val = 1.0 if (rush_td + rec_td + pass_td) > 0 else 0.0
             else:
-                val = r.get(field)
+                val = r.get(stat_field)
             if val is None:
                 continue
             out.append({"week": r.get("week"), "opponent": r.get("opponent_team", "—"), "value": float(val)})
@@ -296,10 +315,26 @@ def get_player_game_log(player_name: str, team_full_name: str, market_key: str, 
 
 
 def calculate_hit_rate(game_log: list[dict], line: float, side: str = "Over") -> dict | None:
+    """
+    THE single shared hit-rate engine — Leaderboard and Player Search both
+    call this, never a separate inline calculation. Pushes (exact line
+    matches) are excluded from both the hit count AND the denominator.
+    Returns None if there's no game log at all, or every game was a push.
+    """
     if not game_log:
         return None
-    hits = sum(1 for g in game_log if (g["value"] > line if side == "Over" else g["value"] < line))
-    return {"hits": hits, "total": len(game_log)}
+    hits = misses = pushes = 0
+    for g in game_log:
+        if g["value"] == line:
+            pushes += 1
+        elif (g["value"] > line if side == "Over" else g["value"] < line):
+            hits += 1
+        else:
+            misses += 1
+    decided = hits + misses
+    if decided == 0:
+        return None
+    return {"hits": hits, "total": decided, "pushes": pushes}
 
 
 # ── Prop Leaderboard ────────────────────────────────────────────
@@ -318,8 +353,9 @@ def _all_player_weekly_rows(season: int) -> list[dict]:
 def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label: str) -> list[dict]:
     """
     Scans nflverse's full current-season player-week table directly — no
-    per-team loop needed, nflverse already returns every player at once.
-    Returns up to 10 rows: {player, team, position, hits, games, hit_rate, avg, pushes}.
+    per-team loop needed. Uses the SAME calculate_hit_rate engine Player
+    Search uses, per-player, so results are guaranteed consistent between
+    the two subviews for identical inputs.
     """
     season = get_current_season()
     if season is None:
@@ -335,6 +371,7 @@ def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label
         return []
 
     by_player: dict[tuple, list[dict]] = {}
+    positions_by_player: dict[tuple, str] = {}
     for r in rows:
         if r.get("position") not in eligible_positions:
             continue
@@ -343,6 +380,7 @@ def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label
             continue
         key = (r.get("player_display_name") or r.get("player_name"), r.get("team"))
         by_player.setdefault(key, []).append({"week": r.get("week"), "value": float(val)})
+        positions_by_player[key] = r.get("position")
 
     results = []
     for (name, team), games in by_player.items():
@@ -357,26 +395,18 @@ def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label
                 continue
             sample = games
 
-        hits, misses, pushes = 0, 0, 0
-        for g in sample:
-            if g["value"] == line:
-                pushes += 1
-            elif (g["value"] > line if side == "Over" else g["value"] < line):
-                hits += 1
-            else:
-                misses += 1
-        decided = hits + misses
-        if decided == 0:
+        hr = calculate_hit_rate(sample, line, side)
+        if not hr:
             continue
 
         results.append({
             "player": name,
             "team": team,
-            "position": next((r.get("position") for r in rows if (r.get("player_display_name") or r.get("player_name")) == name and r.get("team") == team), ""),
-            "hits": hits,
-            "games": decided,
-            "pushes": pushes,
-            "hit_rate": hits / decided * 100,
+            "position": positions_by_player.get((name, team), ""),
+            "hits": hr["hits"],
+            "games": hr["total"],
+            "pushes": hr["pushes"],
+            "hit_rate": hr["hits"] / hr["total"] * 100,
             "avg": round(sum(g["value"] for g in sample) / len(sample), 1),
         })
 
