@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 
+from core.nfl_player_search import render_nfl_player_search
 from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
@@ -10,9 +11,7 @@ from core.nflverse_data import (
 )
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 from core.lineup_data import (
-    espn_search_players, get_players_by_team, get_players_by_position,
-    get_team_game_context, fetch_player_props_for_event, get_consensus_prop_line,
-    NFL_TEAMS, POSITIONS,
+    get_team_game_context, fetch_player_props_for_event, get_consensus_prop_line, NFL_TEAMS,
 )
 
 _ABBR_TO_FULLNAME = {v.upper(): k for k, v in NFL_TEAMS.items()}
@@ -35,7 +34,6 @@ def _fmt_odds(price):
 
 
 def _opponent_for(team_abbr: str, supabase, now_utc):
-    """Best-effort only — a failure here never breaks the main leaderboard."""
     try:
         full_name = _ABBR_TO_FULLNAME.get(team_abbr)
         if not full_name:
@@ -84,22 +82,14 @@ def render_leaderboard_view(supabase, now_utc):
     for i, r in enumerate(results, 1):
         opp = _opponent_for(r["team"], supabase, now_utc)
         rows.append({
-            "Rank": i,
-            "Player": r["player"],
-            "Team": r["team"],
-            "Pos": r["position"],
-            "Opp": opp,
-            "Hit Rate": r["hit_rate"] / 100.0,
-            "Record": f"{r['hits']} / {r['games']}",
-            avg_label: r["avg"],
+            "Rank": i, "Player": r["player"], "Team": r["team"], "Pos": r["position"], "Opp": opp,
+            "Hit Rate": r["hit_rate"] / 100.0, "Record": f"{r['hits']} / {r['games']}", avg_label: r["avg"],
         })
 
     df = pd.DataFrame(rows)
     st.dataframe(
         df, use_container_width=True, hide_index=True,
-        column_config={
-            "Hit Rate": st.column_config.ProgressColumn("Hit Rate", format="%.0f%%", min_value=0.0, max_value=1.0),
-        },
+        column_config={"Hit Rate": st.column_config.ProgressColumn("Hit Rate", format="%.0f%%", min_value=0.0, max_value=1.0)},
     )
     if any(r["pushes"] > 0 for r in results):
         st.caption("Pushes (exact line matches) are excluded from both hits and the sample denominator.")
@@ -108,43 +98,10 @@ def render_leaderboard_view(supabase, now_utc):
 # =======================
 # PLAYER SEARCH SUBVIEW
 # =======================
-def _player_picker():
-    _method = st.segmented_control("Method", ["Search Player", "Browse Team"], default="Search Player",
-                                    key="ps_method", label_visibility="collapsed") or "Search Player"
-    if _method == "Search Player":
-        _q = st.text_input("Search player name...", key="ps_search",
-                            placeholder="Search player name...", label_visibility="collapsed")
-        if not _q or len(_q.strip()) < 3:
-            return None
-        _results = espn_search_players(_q)
-        if not _results:
-            st.caption("No match — try Browse Team instead.")
-            return None
-        _labels = {f"{r['name']} — {r['position']}, {r['team']}": r for r in _results}
-        _picked = st.selectbox("Result", list(_labels.keys()), label_visibility="collapsed")
-        r = _labels[_picked]
-        return {"name": r["name"], "team": r["team"], "position": r.get("position") or "", "headshot_url": r.get("headshot_url")}
-    else:
-        _c1, _c2 = st.columns(2)
-        with _c1:
-            _team_name = st.selectbox("Team", sorted(NFL_TEAMS.keys()), key="ps_team", label_visibility="collapsed")
-        _team_abbr = NFL_TEAMS.get(_team_name)
-        with _c2:
-            _position = st.selectbox("Position", POSITIONS, key="ps_pos", label_visibility="collapsed")
-        _roster = get_players_by_position(_team_abbr, _position) if _team_abbr else []
-        if not _roster:
-            st.caption("No matching players.")
-            return None
-        _options = {p["name"]: p for p in _roster}
-        _picked_name = st.selectbox("Player", sorted(_options.keys()), key="ps_player")
-        p = _options[_picked_name]
-        return {"name": p["name"], "team": _team_name, "position": p.get("position") or _position, "headshot_url": p.get("headshot_url")}
-
-
 def render_player_search_view(supabase, now_utc):
-    player = _player_picker()
+    player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
     if not player:
-        st.caption("Search for or browse to a player to begin.")
+        st.caption("No eligible players for this team/position.")
         return
 
     _photo_col, _info_col = st.columns([0.8, 3.5])
@@ -160,11 +117,9 @@ def render_player_search_view(supabase, now_utc):
 
     ctx = get_team_game_context(supabase, player["team"], now_utc)
     if ctx.get("opponent"):
-        _side = "vs" if ctx.get("is_home") else "@"
-        st.caption(f"{_side} {ctx['opponent']}")
+        _side_lbl = "vs" if ctx.get("is_home") else "@"
+        st.caption(f"{_side_lbl} {ctx['opponent']}")
 
-    # ── Stat selector — same PROP_STAT_MAP labels the Leaderboard uses,
-    # plus Anytime TD for skill positions only. ────────────────────
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
         _available = _available + list(PLAYER_SEARCH_EXTRA_STATS.keys())
@@ -181,7 +136,6 @@ def render_player_search_view(supabase, now_utc):
         prop_rows = fetch_player_props_for_event(ctx["event_id"], player["position"])
         consensus_line = get_consensus_prop_line(prop_rows, player["name"], odds_market_key)
 
-    # ── Current Market ─────────────────────────────────
     st.markdown("### Current Market")
     if not odds_market_key:
         st.caption(f"{_picked_label} isn't tracked by sportsbooks — research a threshold manually below.")
@@ -204,16 +158,13 @@ def render_player_search_view(supabase, now_utc):
         else:
             st.caption("No individual sportsbook prices available for this market yet.")
 
-    # ── Threshold to research (defaults to consensus if available) ──
     _threshold = st.number_input(
-        "Threshold to research",
-        min_value=0.0,
+        "Threshold to research", min_value=0.0,
         value=float(consensus_line) if consensus_line is not None else 0.5,
         step=0.5, key="ps_threshold",
     )
     _side = st.segmented_control("Side", ["Over", "Under"], default="Over", key="ps_side", label_visibility="collapsed") or "Over"
 
-    # ── Historical Hit Rates — SAME engine as Leaderboard ────────
     st.markdown("### Historical Hit Rates")
     _full_log = get_player_game_log(player["name"], player["team"], stat_field, n_games=None)
     if not _full_log:
@@ -230,15 +181,13 @@ def render_player_search_view(supabase, now_utc):
         st.caption("\"Line\" below is your selected research threshold, not a historical sportsbook line.")
         _log_rows = [
             {
-                "Week": g["week"], "Opponent": g["opponent"], _picked_label: g["value"],
-                "Line": _threshold,
+                "Week": g["week"], "Opponent": g["opponent"], _picked_label: g["value"], "Line": _threshold,
                 "Result": ("Over" if g["value"] > _threshold else "Push" if g["value"] == _threshold else "Under"),
             }
             for g in _full_log[:10]
         ]
         st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
 
-    # ── Usage & Role ────────────────────────────────────
     st.markdown("### Usage & Role")
     usage = get_player_usage(player["name"], player["team"], player["position"])
     metrics = POSITION_METRICS.get(player["position"], [])
@@ -259,21 +208,17 @@ def render_player_search_view(supabase, now_utc):
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption("Usage data: nflverse")
 
-    # ── Game Environment ─────────────────────────────────
     if ctx:
         st.markdown("### Game Environment")
         _env = {
-            "Opponent": ctx.get("opponent", "—"),
-            "Home/Away": "Home" if ctx.get("is_home") else "Away",
-            "Spread": ctx.get("spread", "—"),
-            "Game Total": ctx.get("game_total", "—"),
+            "Opponent": ctx.get("opponent", "—"), "Home/Away": "Home" if ctx.get("is_home") else "Away",
+            "Spread": ctx.get("spread", "—"), "Game Total": ctx.get("game_total", "—"),
             "Team Implied Total": ctx.get("team_implied_total", "—"),
         }
         st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
 
-    # ── Opponent Defense ──────────────────────────────
     st.markdown("### Opponent Defense")
-    _def = get_opponent_defense(ctx.get("opponent"), player["position"], "PPR")  # PPR used for fantasy-pts-allowed — no scoring control in this view yet
+    _def = get_opponent_defense(ctx.get("opponent"), player["position"], "PPR")
     _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
     if not ctx.get("opponent"):
         st.caption("No opponent this week (bye week).")
