@@ -182,6 +182,14 @@ def get_current_season() -> int:
         return None
 
 
+def _week_label(week, season, current_season):
+    """Current-season games: 'W8'. Prior-season games: 'W17 2025'.
+    Uses the game's own recorded season, never inferred from week number."""
+    if season is not None and current_season is not None and season != current_season:
+        return f"W{week} {season}"
+    return f"W{week}"
+
+
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if not pairs:
@@ -362,6 +370,13 @@ def get_card_season_stats(player_name: str, team_full_name: str, position: str) 
 
 
 def get_recent_games(player_name: str, team_full_name: str, position: str, n: int = 5) -> list[dict]:
+    """
+    Returns rows with a "Week" label already season-aware ('W8' for the
+    current season, 'W17 2025' for a prior one). NOTE: this function only
+    ever fetches the current season internally today — no cross-season
+    fetch exists yet — so every label will currently render plain 'W#'.
+    The labeling logic is correct and ready for if/when that changes.
+    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
@@ -375,11 +390,11 @@ def get_recent_games(player_name: str, team_full_name: str, position: str, n: in
         rows = _build_weekly_rows(_load_player_stats(season), _load_team_stats(season), player_name, team_abbr)
         if not rows:
             return []
-        rows_sorted = sorted(rows, key=lambda r: r.get("week") or 0, reverse=True)[:n]
+        rows_sorted = sorted(rows, key=lambda r: (r.get("season") or 0, r.get("week") or 0), reverse=True)[:n]
 
         out = []
         for r in rows_sorted:
-            row = {"Week": r.get("week"), "Opponent": r.get("opponent_team", "—")}
+            row = {"Week": _week_label(r.get("week"), r.get("season", season), season), "Opponent": r.get("opponent_team", "—")}
             if position in ("WR", "TE"):
                 row.update({
                     "Targets": r.get("targets"), "Receptions": r.get("receptions"),
@@ -403,13 +418,6 @@ def get_recent_games(player_name: str, team_full_name: str, position: str, n: in
 
 
 def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, n_games: int | None = 10) -> list[dict]:
-    """
-    Returns [{"week","opponent","value","season"}], most recent first.
-    "season" is tagged on each entry (current season only — this
-    function has no prior-season blending) so downstream display code
-    can label cross-season games correctly if the sample logic ever
-    changes; today every entry's season is always the current one.
-    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
