@@ -39,10 +39,11 @@ def render_nfl_player_card(
     full display name, abbreviated here for display.
     context: dict from core.lineup_data.get_team_game_context(), or
     None/{} for a bye week / context not yet available.
-    compact=True: identity + opponent only (Prop Leaderboard's Player
-    Search) — no season-stat row. compact=False (Lineup Analysis):
-    adds a 3-stat season snapshot, reusing the exact same season
-    calculation Usage & Role uses, when the player has current-season games.
+    compact=True (Prop Leaderboard's Player Search): tight, width-
+    constrained flex-row card — headshot and identity text grouped
+    close together, card doesn't stretch across the full page.
+    compact=False (Lineup Analysis): unchanged — full-width st.container
+    + st.columns layout, plus the 3-stat season snapshot.
     """
     context = context or {}
     team_abbr = _team_abbr(player.get("team", ""))
@@ -58,9 +59,35 @@ def render_nfl_player_card(
     elif "opponent" in context:  # context was fetched but genuinely empty -> bye week
         opp_line = "Bye Week"
 
-    season_stats = [] if compact else get_card_season_stats(player["name"], player.get("team", ""), player.get("position", ""))
+    if compact:
+        headshot_size = 72
+        img_html = (
+            f"<img src='{headshot}' style='width:{headshot_size}px;height:{headshot_size}px;"
+            f"object-fit:contain;flex-shrink:0;'/>"
+            if headshot else
+            f"<div style='width:{headshot_size}px;height:{headshot_size}px;border-radius:8px;"
+            f"background:rgba(128,128,128,0.15);flex-shrink:0;'></div>"
+        )
+        lines = [
+            f"<div style='font-weight:700;font-size:1.05rem;line-height:1.25'>{player['name']}</div>",
+            f"<div style='opacity:0.65;font-size:0.85rem;line-height:1.3'>{player.get('position','')} · {team_abbr}</div>",
+        ]
+        if opp_line:
+            lines.append(f"<div style='opacity:0.6;font-size:0.8rem;line-height:1.3'>{opp_line}</div>")
 
-    headshot_size = 80 if not compact else 64  # single value each — no real desktop/mobile breakpoint in Streamlit
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:16px;max-width:520px;"
+            f"border:1px solid rgba(128,128,128,0.25);border-radius:12px;padding:18px;margin:2px 0;'>"
+            f"{img_html}"
+            f"<div style='min-width:0;'>{''.join(lines)}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── Full variant — unchanged from before ─────────────────
+    season_stats = get_card_season_stats(player["name"], player.get("team", ""), player.get("position", ""))
+    headshot_size = 80
 
     with st.container(border=True):
         _photo_col, _info_col = st.columns([0.85, 3.15])
