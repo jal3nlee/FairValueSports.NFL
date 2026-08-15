@@ -1,4 +1,6 @@
 # tabs/prop_leaderboard.py
+# User-facing name: "Prop Research" — module filename kept as-is to
+# avoid unnecessary import-risk across the app.
 import streamlit as st
 import pandas as pd
 
@@ -9,7 +11,8 @@ from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
     build_prop_leaderboard, get_player_game_log, get_current_season,
-    get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS,
+    get_usage_samples, get_expanded_season_stats, get_recent_games,
+    LINEUP_USAGE_METRICS, METRIC_LABELS, PERCENT_METRICS,
 )
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 from core.lineup_data import (
@@ -46,16 +49,25 @@ def _opponent_for(team_abbr: str, supabase, now_utc):
         return "—"
 
 
+def _fmt_usage_val(v, is_pct):
+    if v is None:
+        return "—"
+    return f"{v * 100:.0f}%" if is_pct else f"{v:.1f}"
+
+
+# =======================
+# PROP LEADERBOARD SUBVIEW
+# =======================
 def render_leaderboard_view(supabase, now_utc):
     _c1, _c2, _c3, _c4 = st.columns([1.8, 1.2, 1.2, 1.6])
     with _c1:
-        stat_label = st.selectbox("Stat", list(PROP_STAT_MAP.keys()), key="pl_stat")
+        stat_label = st.selectbox("Prop", list(PROP_STAT_MAP.keys()), key="pl_stat")
     with _c2:
         side = st.selectbox("Over/Under", ["Over", "Under"], key="pl_side")
     with _c3:
         line = st.number_input("Prop Line", min_value=0.0, value=49.5, step=0.5, key="pl_line")
     with _c4:
-        sample_label = st.selectbox("Sample", list(SAMPLE_OPTIONS.keys()), index=1, key="pl_sample")
+        sample_label = st.selectbox("Sample Size", list(SAMPLE_OPTIONS.keys()), index=1, key="pl_sample")
 
     _run = st.button("Find Top 10", type="primary", key="pl_run")
     st.markdown(f"### {side} {line:g} {stat_label}")
@@ -93,18 +105,10 @@ def render_leaderboard_view(supabase, now_utc):
         st.caption("Pushes (exact line matches) are excluded from both hits and the sample denominator.")
 
 
-def render_player_search_view(supabase, now_utc):
-    st.markdown("### Player Search")
-    player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
-    if not player:
-        st.caption("No eligible players for this team/position.")
-        return
-
-    ctx = get_team_game_context(supabase, player["team"], now_utc)
-    render_nfl_player_card(player, ctx, compact=False)
-
-    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
-
+# =======================
+# PROP ANALYSIS (open by default)
+# =======================
+def _render_prop_analysis(player: dict, ctx: dict, supabase, now_utc):
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
         _available = _available + list(PLAYER_SEARCH_EXTRA_STATS.keys())
@@ -184,7 +188,7 @@ def render_player_search_view(supabase, now_utc):
 
     if _full_log:
         st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
-        st.markdown("### Recent Results")
+        st.markdown("### Recent Prop Results")
         st.caption("Line = your selected research line, not a historical sportsbook line.")
         _cur_season = get_current_season()
         _log_rows = []
@@ -196,63 +200,116 @@ def render_player_search_view(supabase, now_utc):
             })
         st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    st.markdown("### Usage & Role")
-    usage = get_player_usage(player["name"], player["team"], player["position"])
-    metrics = POSITION_METRICS.get(player["position"], [])
-    if not usage or not metrics:
-        st.caption("Usage data temporarily unavailable.")
+# =======================
+# PLAYER CONTEXT (closed by default)
+# =======================
+def _render_player_context(player: dict, ctx: dict):
+    # ── Season Stats ────────────────────────────────
+    st.markdown("#### Season Stats")
+    expanded = get_expanded_season_stats(player["name"], player["team"], player["position"])
+    if not expanded:
+        st.caption("No current-season stats available yet.")
     else:
-        _rows = []
-        for m in metrics:
-            label = METRIC_LABELS.get(m, m)
-            is_pct = m in PERCENT_METRICS
-            u = usage.get(m, {})
-            sv, cv = u.get("season"), u.get("current_role")
-            _rows.append({
-                "Metric": label,
-                "Season": (f"{sv * 100:.0f}%" if is_pct and sv is not None else f"{sv:.1f}" if sv is not None else "—"),
-                "Current Role": (f"{cv * 100:.0f}%" if is_pct and cv is not None else f"{cv:.1f}" if cv is not None else "—"),
-            })
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
-        st.caption("Usage data: nflverse")
+        st.dataframe(pd.DataFrame([expanded]), use_container_width=True, hide_index=True)
 
-    if ctx:
-        st.markdown("### Game Environment")
-        _env = {
-            "Opponent": ctx.get("opponent", "—"), "Home/Away": "Home" if ctx.get("is_home") else "Away",
-            "Spread": ctx.get("spread", "—"), "Game Total": ctx.get("game_total", "—"),
-            "Team Implied Total": ctx.get("team_implied_total", "—"),
-        }
-        st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    st.markdown("### Opponent Defense")
-    _def = get_opponent_defense(ctx.get("opponent"), player["position"], "PPR")
-    _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
-    if not ctx.get("opponent"):
+    # ── Recent Game Stats ────────────────────────────
+    st.markdown("#### Recent Game Stats")
+    metrics = LINEUP_USAGE_METRICS.get(player["position"], [])
+    if metrics:
+        u = get_usage_samples(player["name"], player["team"], player["position"])
+        if u:
+            _rows = []
+            for m in metrics:
+                is_pct = m in PERCENT_METRICS
+                entry = u.get(m, {})
+                row = {"Metric": METRIC_LABELS.get(m, m)}
+                for wkey, wlabel_base, wreq in [("season", "Season", None), ("last5", "Last 5", 5), ("last3", "Last 3", 3)]:
+                    w = entry.get(wkey, {})
+                    games = w.get("games", 0)
+                    col_label = wlabel_base if (wreq is None or games >= wreq) else f"{wlabel_base} ({games})"
+                    row[col_label] = _fmt_usage_val(w.get("value"), is_pct)
+                _rows.append(row)
+            st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+
+    st.markdown("##### Recent Game Log")
+    games = get_recent_games(player["name"], player["team"], player["position"], n=10)
+    if games:
+        st.dataframe(pd.DataFrame(games), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No current-season game log available yet.")
+
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+
+    # ── Opponent / Matchup Stats ─────────────────────
+    st.markdown("#### Opponent / Matchup Stats")
+    opponent = ctx.get("opponent")
+    if not opponent:
         st.caption("No opponent this week (bye week).")
-    elif not _def or not _metric_set:
+        return
+
+    _side_word = "vs" if ctx.get("is_home") else "@"
+    st.caption(f"{_side_word} {opponent}")
+    _env = {
+        "Spread": ctx.get("spread", "—"), "Game Total": ctx.get("game_total", "—"),
+        "Team Implied Total": ctx.get("team_implied_total", "—"),
+    }
+    st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
+
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    _def = get_opponent_defense(opponent, player["position"], "PPR")
+    _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
+    if not _def or not _metric_set:
         st.caption("Opponent defensive data is not available yet.")
     else:
-        _rows = [{"Metric": label, f"vs {ctx.get('opponent')}": _def.get(field, "—")} for field, label in _metric_set]
+        _header = f"{opponent} Defense vs {player['position']}"
+        _rows = [{"Metric": label, _header: _def.get(field, "—")} for field, label in _metric_set]
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption("Defensive data: nflverse")
 
 
+# =======================
+# PLAYER RESEARCH SUBVIEW
+# =======================
+def render_player_research_view(supabase, now_utc):
+    st.markdown("### Player Search")
+    player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
+    if not player:
+        st.caption("No eligible players for this team/position.")
+        return
+
+    ctx = get_team_game_context(supabase, player["team"], now_utc)
+    render_nfl_player_card(player, ctx, compact=False)
+
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+
+    with st.expander("Prop Analysis", expanded=True):
+        _render_prop_analysis(player, ctx, supabase, now_utc)
+
+    with st.expander("Player Context", expanded=False):
+        _render_player_context(player, ctx)
+
+
+# =======================
+# TOP-LEVEL RENDER
+# =======================
 def render(supabase, now_utc):
-    st.markdown("## Prop Leaderboard")
+    st.markdown("## Prop Research")
     st.markdown(
         "<div style='opacity:0.7;font-size:0.95rem;margin:0 0 6px 0'>"
-        "Research NFL player props by historical hit rates or by individual player."
+        "Research NFL player props by individual player or historical hit rates."
         "</div>",
         unsafe_allow_html=True,
     )
 
-    _view = st.segmented_control("View", ["Leaderboard", "Player Search"], default="Leaderboard",
-                                  key="pl_view", label_visibility="collapsed") or "Leaderboard"
+    _view = st.segmented_control(
+        "View", ["Player Research", "Prop Leaderboard"], default="Player Research",
+        key="pl_view", label_visibility="collapsed",
+    ) or "Player Research"
 
-    if _view == "Leaderboard":
-        render_leaderboard_view(supabase, now_utc)
+    if _view == "Player Research":
+        render_player_research_view(supabase, now_utc)
     else:
-        render_player_search_view(supabase, now_utc)
+        render_leaderboard_view(supabase, now_utc)
