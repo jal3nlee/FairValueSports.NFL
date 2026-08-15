@@ -1,13 +1,4 @@
 # core/nflverse_data.py
-# nflverse integration via nflreadpy. Normalizes provider-specific
-# fields into FVB's own schema so the rest of the app never touches
-# nflreadpy/polars directly — makes the provider swappable later.
-#
-# Known limitation, stated plainly: there is no canonical FVB player ID
-# anywhere in the app yet (Lineup Comparison's player selector comes from
-# ESPN search/roster, with no gsis_id attached). Until that exists, this
-# module joins to nflverse by normalized name + team, not a stable ID,
-# despite nflverse itself having real IDs available (load_players()).
 import streamlit as st
 
 try:
@@ -16,7 +7,7 @@ try:
 except Exception:
     _NFLVERSE_AVAILABLE = False
 
-RECENCY_DECAY = 0.85  # centralized, tunable — never scattered inline
+RECENCY_DECAY = 0.85
 
 POSITION_METRICS = {
     "WR": ["targets_per_game", "target_share", "receiving_yards_per_game"],
@@ -37,9 +28,24 @@ METRIC_LABELS = {
 }
 PERCENT_METRICS = {"target_share", "carry_share"}
 
-# Prior-season blend schedule — spec section 15, games_played -> current-season weight
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
-_BLEND_FLOOR_GAMES = 6  # at/after this many games, prior season contributes ~0
+_BLEND_FLOOR_GAMES = 6
+
+# Maps Odds API market keys (from core/lineup_data.py) to nflverse's
+# per-game field names, so a prop line can be checked against real
+# historical results without a second, separate stat vocabulary.
+MARKET_TO_STAT_FIELD = {
+    "player_pass_yds": "passing_yards",
+    "player_pass_tds": "passing_tds",
+    "player_pass_interceptions": "passing_interceptions",
+    "player_pass_attempts": "attempts",
+    "player_pass_completions": "completions",
+    "player_rush_yds": "rushing_yards",
+    "player_rush_attempts": "carries",
+    "player_reception_yds": "receiving_yards",
+    "player_receptions": "receptions",
+    "player_anytime_td": "_any_td",  # derived, not a raw column
+}
 
 
 def _norm_name(name: str) -> str:
@@ -92,10 +98,7 @@ def get_current_season() -> int:
 
 
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
-    """
-    values: chronological order, OLDEST first, most recent LAST.
-    Ignores None entries rather than letting them distort normalization.
-    """
+    """values: chronological order, OLDEST first, most recent LAST."""
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if not pairs:
         return None
@@ -110,11 +113,6 @@ def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
 
 
 def blend_prior_season(current_value, prior_value, games_played: int, continuity: bool = True):
-    """
-    Blends prior-season value into current-season value, weight declining
-    rapidly as games_played grows. continuity=False (team change, rookie,
-    etc.) drops prior-season entirely regardless of games_played.
-    """
     if current_value is None and prior_value is None:
         return None
     if not continuity or prior_value is None or games_played >= _BLEND_FLOOR_GAMES:
@@ -130,9 +128,7 @@ def _build_weekly_rows(player_stats, team_stats, player_name: str, team_abbr: st
         return []
     try:
         target_name = _norm_name(player_name)
-        rows = player_stats.filter(
-            player_stats["team"] == team_abbr
-        ).to_dicts()
+        rows = player_stats.filter(player_stats["team"] == team_abbr).to_dicts()
         rows = [r for r in rows if _norm_name(r.get("player_display_name") or r.get("player_name") or "") == target_name]
         rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
 
@@ -165,10 +161,7 @@ def _team_abbr_for(team_full_name: str, teams_df) -> str | None:
 
 
 def get_player_usage(player_name: str, team_full_name: str, position: str, prior_team_full_name: str | None = None) -> dict:
-    """
-    Returns {} on any failure — Lineup Comparison must keep working even
-    if nflverse is unreachable. Never raises.
-    """
+    """Returns {} on any failure — callers must keep working even if nflverse is unreachable."""
     if not _NFLVERSE_AVAILABLE:
         return {}
     try:
@@ -230,3 +223,54 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
         return result
     except Exception:
         return {}
+
+
+def get_player_game_log(player_name: str, team_full_name: str, market_key: str, n_games: int = 10) -> list[dict]:
+    """
+    Returns up to n_games most-recent CURRENT-SEASON games as
+    [{"week": int, "opponent": str, "value": float}], most recent first.
+    Pass n_games=None for the full season. Empty list on any failure.
+    """
+    if not _NFLVERSE_AVAILABLE:
+        return []
+    try:
+        season = get_current_season()
+        if season is None:
+            return []
+        teams_df = _load_teams()
+        team_abbr = _team_abbr_for(team_full_name, teams_df)
+        if not team_abbr:
+            return []
+        stats = _load_player_stats(season)
+        rows = _build_weekly_rows(stats, _load_team_stats(season), player_name, team_abbr)
+        if not rows:
+            return []
+
+        field = MARKET_TO_STAT_FIELD.get(market_key)
+        out = []
+        for r in rows:
+            if field == "_any_td":
+                rush_td = r.get("rushing_tds") or 0
+                rec_td = r.get("receiving_tds") or 0
+                pass_td = r.get("passing_tds") or 0
+                val = 1.0 if (rush_td + rec_td + pass_td) > 0 else 0.0
+            else:
+                val = r.get(field)
+            if val is None:
+                continue
+            out.append({"week": r.get("week"), "opponent": r.get("opponent_team", "—"), "value": float(val)})
+        out.sort(key=lambda x: x["week"] or 0, reverse=True)
+        return out[:n_games] if n_games else out
+    except Exception:
+        return []
+
+
+def calculate_hit_rate(game_log: list[dict], line: float, side: str = "Over") -> dict | None:
+    """side: 'Over' or 'Under'. Returns None if there's no game log to check."""
+    if not game_log:
+        return None
+    hits = sum(
+        1 for g in game_log
+        if (g["value"] > line if side == "Over" else g["value"] < line)
+    )
+    return {"hits": hits, "total": len(game_log)}
