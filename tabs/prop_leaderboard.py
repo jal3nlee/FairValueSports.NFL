@@ -101,15 +101,18 @@ def render_leaderboard_view(supabase, now_utc):
 # PLAYER SEARCH SUBVIEW
 # =======================
 def render_player_search_view(supabase, now_utc):
+    st.markdown("### Player Search")
     player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
     if not player:
         st.caption("No eligible players for this team/position.")
         return
 
     ctx = get_team_game_context(supabase, player["team"], now_utc)
-    render_nfl_player_card(player, ctx, compact=True)
 
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    # ── Full-width MLB-style player card ──────────────
+    render_nfl_player_card(player, ctx, compact=False)
+
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
@@ -118,8 +121,10 @@ def render_player_search_view(supabase, now_utc):
         st.info("No supported prop stats for this position.")
         return
 
-    _sc1, _sc2, _sc3, _sc4 = st.columns([1.3, 0.75, 0.85, 1.1], gap="small")
-    with _sc1:
+    # ── Row 1: Stat | Prop Line | Sample ──────────────
+    _r1c1, _r1c2, _r1c3 = st.columns([1.6, 1.0, 1.4], gap="small")
+    with _r1c1:
+        st.caption("Stat")
         _picked_label = st.selectbox("Stat", _available, key="ps_stat_pick", label_visibility="collapsed")
     stat_field = PROP_STAT_MAP.get(_picked_label) or PLAYER_SEARCH_EXTRA_STATS.get(_picked_label)
 
@@ -130,22 +135,28 @@ def render_player_search_view(supabase, now_utc):
         prop_rows = fetch_player_props_for_event(ctx["event_id"], player["position"])
         consensus_line = get_consensus_prop_line(prop_rows, player["name"], odds_market_key)
 
-    with _sc2:
-        _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
-                                      key="ps_side", label_visibility="collapsed") or "Over"
-    with _sc3:
+    with _r1c2:
+        st.caption("Prop Line")
         _threshold = st.number_input(
             "Prop Line", min_value=0.0,
             value=float(consensus_line) if consensus_line is not None else 0.5,
             step=0.5, key="ps_threshold", label_visibility="collapsed",
         )
-    with _sc4:
+    with _r1c3:
+        st.caption("Sample")
         _sample_label = st.selectbox(
             "Sample", ["Last 5 Games", "Last 10 Games", "Season"], index=1,
             key="ps_sample", label_visibility="collapsed",
         )
 
-    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+    # ── Row 2: Side, its own row ───────────────────────
+    st.caption("Side")
+    _side_col, _ = st.columns([1.0, 3.0])
+    with _side_col:
+        _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
+                                      key="ps_side", label_visibility="collapsed") or "Over"
+
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
     # ── Current Market ─────────────────────────────────
     st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 2px 0'>Current Market</div>", unsafe_allow_html=True)
