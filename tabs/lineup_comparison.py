@@ -13,8 +13,15 @@ from core.lineup_data import (
     FLEX_POSITIONS,
 )
 from core.nflverse_data import get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS
+from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
+
+# Streamlit has no real viewport-breakpoint mechanism for st.image sizing —
+# this single value (within the requested 64–80px desktop range) is used
+# for all screen sizes, since a true 48–64px mobile-only variant isn't
+# something Streamlit exposes without custom JS/CSS injection.
+HEADSHOT_SIZE = 72
 
 
 def _dash(v):
@@ -50,10 +57,14 @@ def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
 
 def render_selected_player_header(p: dict, mode: str, slot_idx: int):
     ctx = p.get("context", {})
-    _photo_col, _info_col = st.columns([0.7, 3.3])
+    _photo_col, _info_col = st.columns([0.95, 3.05])
     with _photo_col:
         if p.get("headshot_url"):
-            st.image(p["headshot_url"], width=44)
+            st.markdown(
+                f"<img src='{p['headshot_url']}' style='width:{HEADSHOT_SIZE}px;height:{HEADSHOT_SIZE}px;"
+                f"object-fit:contain;'/>",
+                unsafe_allow_html=True,
+            )
     with _info_col:
         st.markdown(
             f"<div style='font-weight:700;font-size:1rem;line-height:1.2'>{p['name']}</div>"
@@ -250,7 +261,7 @@ def render(supabase, now_utc):
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Usage & Role — no arrows, plain values only ────
+    # ── Usage & Role ────────────────────────────────────
     _section_heading("Usage & Role")
     positions = {p["position"] for p in enriched}
     metrics = POSITION_METRICS.get(next(iter(positions)), []) if len(positions) == 1 else ["targets_per_game"]
@@ -290,3 +301,38 @@ def render(supabase, now_utc):
         for label, vals, higher in _env_metrics:
             _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
+        st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+
+    # ── Opponent Defense ──────────────────────────────
+    _section_heading("Opponent Defense")
+    _def_by_player = {}
+    for p in enriched:
+        opp = p["context"].get("opponent")
+        _def_by_player[p["name"]] = get_opponent_defense(opp, p["position"], _scoring)
+
+    if all(v is None for v in _def_by_player.values()):
+        _any_bye = any(not p["context"].get("opponent") for p in enriched)
+        if _any_bye:
+            st.caption("No opponent this week for one or more selected players (bye week).")
+        else:
+            st.caption("Opponent defensive data is not available yet.")
+    else:
+        _headers = []
+        for p in enriched:
+            opp = p["context"].get("opponent")
+            _headers.append(f"{p['name']} vs {opp}" if opp else f"{p['name']} — Bye Week")
+
+        positions_in_view = {p["position"] for p in enriched}
+        metric_set = POSITION_DEFENSE_METRICS.get(next(iter(positions_in_view)), []) if len(positions_in_view) == 1 else []
+        if not metric_set:
+            st.caption("Select players at the same position to see matched defensive context.")
+        else:
+            _rows = []
+            for field, label in metric_set:
+                row = [label]
+                for p in enriched:
+                    d = _def_by_player.get(p["name"])
+                    row.append(_dash(d.get(field)) if d else "—")
+                _rows.append(row)
+            st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _headers), use_container_width=True, hide_index=True)
+        st.caption("Defensive data: nflverse")
