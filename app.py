@@ -8,7 +8,16 @@ from supabase import create_client, Client
 from streamlit_cookies_manager import EncryptedCookieManager
 
 from core.data_sources import infer_current_week_index
-from tabs import market_movers, fair_value_model, matchup_center, lineup_comparison, fantasy_draft, sportsbook_screener, parlay_builder
+from tabs import (
+    market_movers,
+    fair_value_model,
+    matchup_center,
+    lineup_comparison,
+    fantasy_draft,
+    player_props,
+    sportsbook_screener,
+    parlay_builder,
+)
 
 # =======================
 # AUTH
@@ -218,8 +227,9 @@ with st.sidebar.expander("How to use", expanded=False):
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
 4. **Lineup Comparison** — compare fantasy players side by side using real game odds and market props.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
-6. **Sportsbook Screener** — pure line shopping across every sportsbook.
-7. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
+6. **Player Props** — research sportsbook player props against historical performance and usage.
+7. **Sportsbook Screener** — pure line shopping across every sportsbook.
+8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
         """
     )
 
@@ -280,9 +290,8 @@ with st.sidebar.expander("Disclaimer", expanded=False):
 def run_app():
     now_utc = datetime.now(timezone.utc)
 
-    # Bankroll/Kelly UI removed from the sidebar for now — using fixed
-    # defaults under the hood since several tabs still require these
-    # as arguments. Re-add a sidebar control later if needed.
+    # Bankroll/Kelly UI removed from the sidebar — fixed defaults under the
+    # hood since several tabs still require these as arguments.
     eff_bankroll = 1000.0
     eff_kelly = 0.5
 
@@ -292,6 +301,7 @@ def run_app():
         "Matchup Center",
         "Lineup Comparison",
         "Fantasy Draft",
+        "Player Props",
         "Sportsbook Screener",
         "Parlay Builder",
     ])
@@ -312,9 +322,12 @@ def run_app():
         fantasy_draft.render()
 
     with tabs[5]:
-        sportsbook_screener.render(supabase, now_utc)
+        player_props.render(supabase, now_utc)
 
     with tabs[6]:
+        sportsbook_screener.render(supabase, now_utc)
+
+    with tabs[7]:
         parlay_builder.render(supabase, now_utc, eff_bankroll, eff_kelly, authed)
 
 
