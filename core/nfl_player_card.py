@@ -1,8 +1,11 @@
 # core/nfl_player_card.py
-# Shared, compact NFL player identity card: headshot, name, position/team,
-# opponent + game time (or Bye Week), and — non-compact only — a 3-stat
-# position-relevant season snapshot. No betting-market data (spread,
-# game total, team total) anymore; that lives in Game Environment.
+# Shared NFL player identity card. Two variants:
+#   compact=True  — Prop Leaderboard's Player Search: tight, width-
+#                   constrained identity-only card. Unchanged.
+#   compact=False — Lineup Analysis: MLB-style two-region profile card —
+#                   left identity group, right "Season Stats" panel.
+#                   No betting-market data (spread, game total, team
+#                   total); that lives in Game Environment.
 import streamlit as st
 
 from core.odds_math import parse_iso_dt_utc, EASTERN
@@ -39,11 +42,6 @@ def render_nfl_player_card(
     full display name, abbreviated here for display.
     context: dict from core.lineup_data.get_team_game_context(), or
     None/{} for a bye week / context not yet available.
-    compact=True (Prop Leaderboard's Player Search): tight, width-
-    constrained flex-row card — headshot and identity text grouped
-    close together, card doesn't stretch across the full page.
-    compact=False (Lineup Analysis): unchanged — full-width st.container
-    + st.columns layout, plus the 3-stat season snapshot.
     """
     context = context or {}
     team_abbr = _team_abbr(player.get("team", ""))
@@ -59,6 +57,7 @@ def render_nfl_player_card(
     elif "opponent" in context:  # context was fetched but genuinely empty -> bye week
         opp_line = "Bye Week"
 
+    # ── Compact variant — Prop Leaderboard's Player Search — unchanged ──
     if compact:
         headshot_size = 72
         img_html = (
@@ -85,40 +84,54 @@ def render_nfl_player_card(
         )
         return
 
-    # ── Full variant — unchanged from before ─────────────────
+    # ── Full variant — Lineup Analysis — MLB-style two-region card ──
     season_stats = get_card_season_stats(player["name"], player.get("team", ""), player.get("position", ""))
-    headshot_size = 80
+    headshot_size = 88
 
     with st.container(border=True):
-        _photo_col, _info_col = st.columns([0.85, 3.15])
-        with _photo_col:
-            if headshot:
+        _left_col, _right_col = st.columns([2.2, 1.8], gap="medium")
+
+        with _left_col:
+            _photo_col, _info_col = st.columns([0.8, 2.6])
+            with _photo_col:
+                if headshot:
+                    st.markdown(
+                        f"<div style='width:{headshot_size}px;height:{headshot_size}px;display:flex;"
+                        f"align-items:center;justify-content:center;overflow:hidden;'>"
+                        f"<img src='{headshot}' style='width:100%;height:100%;object-fit:contain;'/></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='width:{headshot_size}px;height:{headshot_size}px;border-radius:8px;"
+                        f"background:rgba(128,128,128,0.15);'></div>",
+                        unsafe_allow_html=True,
+                    )
+            with _info_col:
                 st.markdown(
-                    f"<div style='width:{headshot_size}px;height:{headshot_size}px;display:flex;"
-                    f"align-items:center;justify-content:center;overflow:hidden;'>"
-                    f"<img src='{headshot}' style='width:100%;height:100%;object-fit:contain;'/></div>",
+                    f"<div style='font-size:1.4rem;font-weight:700;line-height:1.15;margin-top:2px'>{player['name']}</div>"
+                    f"<div style='opacity:0.7;font-size:0.9rem;line-height:1.3;margin-top:2px'>"
+                    f"{player.get('position','')} · {team_abbr}</div>",
                     unsafe_allow_html=True,
                 )
-            else:
-                st.markdown(
-                    f"<div style='width:{headshot_size}px;height:{headshot_size}px;border-radius:8px;"
-                    f"background:rgba(128,128,128,0.15);'></div>",
-                    unsafe_allow_html=True,
-                )
-        with _info_col:
-            st.markdown(
-                f"<div style='font-weight:700;font-size:1.05rem;line-height:1.25;margin-top:2px'>{player['name']}</div>"
-                f"<div style='opacity:0.65;font-size:0.85rem;line-height:1.3'>{player.get('position','')} · {team_abbr}</div>",
-                unsafe_allow_html=True,
-            )
-            if opp_line:
-                st.markdown(
-                    f"<div style='opacity:0.6;font-size:0.8rem;margin-top:1px'>{opp_line}</div>",
-                    unsafe_allow_html=True,
-                )
+                if opp_line:
+                    st.markdown(
+                        f"<div style='opacity:0.6;font-size:0.85rem;margin-top:2px'>{opp_line}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+        with _right_col:
             if season_stats:
-                _stat_str = "   ·   ".join(f"{s['label']} {s['value']:g}" for s in season_stats)
                 st.markdown(
-                    f"<div style='opacity:0.75;font-size:0.8rem;margin-top:4px'>{_stat_str}</div>",
+                    "<div style='opacity:0.6;font-size:0.78rem;font-weight:600;letter-spacing:0.03em;"
+                    "text-transform:uppercase;margin-bottom:4px'>2026 Season Stats</div>",
                     unsafe_allow_html=True,
                 )
+                _rows_html = "".join(
+                    f"<div style='display:flex;justify-content:space-between;padding:2px 0;"
+                    f"font-size:0.88rem;border-bottom:1px solid rgba(128,128,128,0.12)'>"
+                    f"<span style='opacity:0.75'>{s['label']}</span>"
+                    f"<span style='font-weight:600'>{s['value']:g}</span></div>"
+                    for s in season_stats
+                )
+                st.markdown(f"<div>{_rows_html}</div>", unsafe_allow_html=True)
