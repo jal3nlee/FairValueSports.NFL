@@ -45,7 +45,7 @@ def _opponent_for(team_abbr: str, supabase, now_utc):
 
 
 # =======================
-# LEADERBOARD SUBVIEW
+# LEADERBOARD SUBVIEW — unchanged
 # =======================
 def render_leaderboard_view(supabase, now_utc):
     _c1, _c2, _c3, _c4 = st.columns([1.8, 1.2, 1.2, 1.6])
@@ -96,7 +96,7 @@ def render_leaderboard_view(supabase, now_utc):
 
 
 # =======================
-# PLAYER SEARCH SUBVIEW
+# PLAYER SEARCH SUBVIEW — tightened layout
 # =======================
 def render_player_search_view(supabase, now_utc):
     player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
@@ -104,29 +104,41 @@ def render_player_search_view(supabase, now_utc):
         st.caption("No eligible players for this team/position.")
         return
 
-    _photo_col, _info_col = st.columns([0.8, 3.5])
+    # ── Player identity — tightened spacing ──────────────
+    _photo_col, _info_col = st.columns([0.7, 3.6])
     with _photo_col:
         if player.get("headshot_url"):
             st.markdown(
-                f"<img src='{player['headshot_url']}' style='width:72px;height:72px;object-fit:contain;'/>",
+                f"<img src='{player['headshot_url']}' style='width:64px;height:64px;object-fit:contain;"
+                f"margin-top:2px'/>",
                 unsafe_allow_html=True,
             )
     with _info_col:
-        st.markdown(f"**{player['name']}**")
-        st.caption(f"{player['position']} · {player['team']}")
+        st.markdown(
+            f"<div style='font-weight:700;font-size:1rem;line-height:1.2;margin-top:4px'>{player['name']}</div>"
+            f"<div style='opacity:0.65;font-size:0.85rem;line-height:1.3'>{player['position']} · {player['team']}</div>",
+            unsafe_allow_html=True,
+        )
 
     ctx = get_team_game_context(supabase, player["team"], now_utc)
     if ctx.get("opponent"):
         _side_lbl = "vs" if ctx.get("is_home") else "@"
-        st.caption(f"{_side_lbl} {ctx['opponent']}")
+        st.markdown(
+            f"<div style='opacity:0.6;font-size:0.8rem;margin:0 0 6px 0'>{_side_lbl} {ctx['opponent']}</div>",
+            unsafe_allow_html=True,
+        )
 
+    # ── Stat | Prop Line | Over/Under — one compact row ──
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
         _available = _available + list(PLAYER_SEARCH_EXTRA_STATS.keys())
     if not _available:
         st.info("No supported prop stats for this position.")
         return
-    _picked_label = st.selectbox("Stat", _available, key="ps_stat_pick")
+
+    _sc1, _sc2, _sc3 = st.columns([1.35, 0.9, 0.75], gap="small")
+    with _sc1:
+        _picked_label = st.selectbox("Stat", _available, key="ps_stat_pick", label_visibility="collapsed")
     stat_field = PROP_STAT_MAP.get(_picked_label) or PLAYER_SEARCH_EXTRA_STATS.get(_picked_label)
 
     odds_market_key = PROP_LABEL_TO_ODDS_MARKET.get(_picked_label)
@@ -136,9 +148,22 @@ def render_player_search_view(supabase, now_utc):
         prop_rows = fetch_player_props_for_event(ctx["event_id"], player["position"])
         consensus_line = get_consensus_prop_line(prop_rows, player["name"], odds_market_key)
 
-    st.markdown("### Current Market")
+    with _sc2:
+        _threshold = st.number_input(
+            "Prop Line", min_value=0.0,
+            value=float(consensus_line) if consensus_line is not None else 0.5,
+            step=0.5, key="ps_threshold", label_visibility="collapsed",
+        )
+    with _sc3:
+        _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
+                                      key="ps_side", label_visibility="collapsed") or "Over"
+
+    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+
+    # ── Current Market — compact, secondary when empty ──
+    st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 2px 0'>Current Market</div>", unsafe_allow_html=True)
     if not odds_market_key:
-        st.caption(f"{_picked_label} isn't tracked by sportsbooks — research a threshold manually below.")
+        st.caption(f"{_picked_label} isn't tracked by sportsbooks — research the line above manually.")
     elif consensus_line is None:
         st.caption("Player props are not available yet. Check back closer to kickoff.")
     else:
@@ -158,27 +183,24 @@ def render_player_search_view(supabase, now_utc):
         else:
             st.caption("No individual sportsbook prices available for this market yet.")
 
-    _threshold = st.number_input(
-        "Threshold to research", min_value=0.0,
-        value=float(consensus_line) if consensus_line is not None else 0.5,
-        step=0.5, key="ps_threshold",
-    )
-    _side = st.segmented_control("Side", ["Over", "Under"], default="Over", key="ps_side", label_visibility="collapsed") or "Over"
+    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    st.markdown("### Historical Hit Rates")
+    # ── Historical Hit Rates — the primary output ────────
+    st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 4px 0'>Historical Hit Rates</div>", unsafe_allow_html=True)
     _full_log = get_player_game_log(player["name"], player["team"], stat_field, n_games=None)
     if not _full_log:
         st.caption("No current-season game log available yet for this player.")
     else:
         _windows = [("Season", _full_log), ("Last 10", _full_log[:10]), ("Last 5", _full_log[:5])]
-        _hc = st.columns(len(_windows))
+        _hc = st.columns(len(_windows), gap="small")
         for col, (label, log) in zip(_hc, _windows):
             hr = calculate_hit_rate(log, _threshold, _side)
             with col:
                 st.metric(label, f"{hr['hits']} / {hr['total']} — {hr['hits']/hr['total']*100:.0f}%" if hr else "—")
 
-        st.markdown("#### Recent Results")
-        st.caption("\"Line\" below is your selected research threshold, not a historical sportsbook line.")
+        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+        st.markdown("**Recent Results**")
+        st.caption("Line = your selected research line, not a historical sportsbook line.")
         _log_rows = [
             {
                 "Week": g["week"], "Opponent": g["opponent"], _picked_label: g["value"], "Line": _threshold,
@@ -188,6 +210,9 @@ def render_player_search_view(supabase, now_utc):
         ]
         st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
 
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+
+    # ── Usage & Role ────────────────────────────────────
     st.markdown("### Usage & Role")
     usage = get_player_usage(player["name"], player["team"], player["position"])
     metrics = POSITION_METRICS.get(player["position"], [])
@@ -208,6 +233,7 @@ def render_player_search_view(supabase, now_utc):
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption("Usage data: nflverse")
 
+    # ── Game Environment ─────────────────────────────────
     if ctx:
         st.markdown("### Game Environment")
         _env = {
@@ -217,6 +243,7 @@ def render_player_search_view(supabase, now_utc):
         }
         st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
 
+    # ── Opponent Defense ──────────────────────────────
     st.markdown("### Opponent Defense")
     _def = get_opponent_defense(ctx.get("opponent"), player["position"], "PPR")
     _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
@@ -231,7 +258,7 @@ def render_player_search_view(supabase, now_utc):
 
 
 # =======================
-# TOP-LEVEL RENDER
+# TOP-LEVEL RENDER — unchanged
 # =======================
 def render(supabase, now_utc):
     st.markdown("## Prop Leaderboard")
