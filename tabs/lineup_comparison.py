@@ -1,4 +1,6 @@
 # tabs/lineup_comparison.py
+# User-facing name: "Lineup Analysis" — module filename kept as-is to
+# avoid unnecessary import-risk across the app (per explicit instruction).
 import streamlit as st
 import pandas as pd
 
@@ -12,16 +14,11 @@ from core.lineup_data import (
     POSITIONS,
     FLEX_POSITIONS,
 )
-from core.nflverse_data import get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS
+from core.nflverse_data import get_usage_samples, get_recent_games, LINEUP_USAGE_METRICS, METRIC_LABELS, PERCENT_METRICS
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
-
-# Streamlit has no real viewport-breakpoint mechanism for st.image sizing —
-# this single value (within the requested 64–80px desktop range) is used
-# for all screen sizes, since a true 48–64px mobile-only variant isn't
-# something Streamlit exposes without custom JS/CSS injection.
-HEADSHOT_SIZE = 72
+HEADSHOT_SIZE = 72  # single value within the requested 64–80px range — Streamlit has no real desktop/mobile breakpoint hook
 
 
 def _dash(v):
@@ -55,7 +52,7 @@ def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
     return names
 
 
-def render_selected_player_header(p: dict, mode: str, slot_idx: int):
+def render_selected_player_header(p: dict, mode: str, slot_idx: int, n_slots: int):
     ctx = p.get("context", {})
     _photo_col, _info_col = st.columns([0.95, 3.05])
     with _photo_col:
@@ -82,11 +79,17 @@ def render_selected_player_header(p: dict, mode: str, slot_idx: int):
                 f"<div style='opacity:0.75;font-size:0.8rem;font-weight:600;margin-top:1px'>{p.get('role', 'Roster')}</div>",
                 unsafe_allow_html=True,
             )
-    _btn_col, _ = st.columns([1, 3])
-    with _btn_col:
+    _bc1, _bc2 = st.columns([1, 1])
+    with _bc1:
         if st.button("Change", key=f"lc_change_{slot_idx}", use_container_width=True):
             st.session_state.pop(f"lc_selected_{slot_idx}", None)
             st.rerun()
+    with _bc2:
+        if slot_idx > 0 and n_slots > 1:
+            if st.button("Remove", key=f"lc_removebtn_{slot_idx}", use_container_width=True):
+                st.session_state.pop(f"lc_selected_{slot_idx}", None)
+                st.session_state["lc_n_slots"] = n_slots - 1
+                st.rerun()
 
 
 def render_player_search(slot_idx: int, allowed_positions: list[str] | None, taken_names: set[str]):
@@ -141,7 +144,7 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
 
     _confirmed = st.session_state.get(f"lc_selected_{slot_idx}")
     if _confirmed:
-        render_selected_player_header(_confirmed, mode, slot_idx)
+        render_selected_player_header(_confirmed, mode, slot_idx, n_slots)
         return _confirmed
 
     _allowed = FLEX_POSITIONS if mode == "FLEX" else None
@@ -171,11 +174,80 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
     return None
 
 
+def _fmt_val(v, is_pct):
+    if v is None:
+        return "—"
+    return f"{v * 100:.0f}%" if is_pct else f"{v:.1f}"
+
+
+def render_usage_role(enriched: list[dict], names: list[str]):
+    _section_heading("Usage & Role")
+    positions = {p["position"] for p in enriched}
+    metrics = LINEUP_USAGE_METRICS.get(next(iter(positions)), []) if len(positions) == 1 else []
+    if not metrics:
+        if len(positions) > 1:
+            st.caption("Select players at the same position to see matched usage metrics.")
+        else:
+            st.caption("Usage data temporarily unavailable.")
+        return
+
+    usage_by_player = {p["name"]: get_usage_samples(p["name"], p["team"], p["position"]) for p in enriched}
+    if not any(usage_by_player.values()):
+        st.caption("Usage data temporarily unavailable.")
+        return
+
+    if len(enriched) == 1:
+        # Single player — wide Season | Last 5 | Last 3 table, per spec #20.
+        p = enriched[0]
+        u = usage_by_player.get(p["name"], {})
+        _rows = []
+        for m in metrics:
+            is_pct = m in PERCENT_METRICS
+            entry = u.get(m, {})
+            row = {"Metric": METRIC_LABELS.get(m, m)}
+            for wkey, wlabel_base, wreq in [("season", "Season", None), ("last5", "Last 5", 5), ("last3", "Last 3", 3)]:
+                w = entry.get(wkey, {})
+                games = w.get("games", 0)
+                col_label = wlabel_base if (wreq is None or games >= wreq) else f"{wlabel_base} ({games})"
+                row[col_label] = _fmt_val(w.get("value"), is_pct)
+            _rows.append(row)
+        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+    else:
+        # Multiple players — Option A: one row per metric per window, player columns.
+        _rows = []
+        for m in metrics:
+            is_pct = m in PERCENT_METRICS
+            label = METRIC_LABELS.get(m, m)
+            for wkey, wlabel in [("season", "Season"), ("last5", "Last 5"), ("last3", "Last 3")]:
+                row = [f"{label} — {wlabel}"]
+                for p in enriched:
+                    w = usage_by_player.get(p["name"], {}).get(m, {}).get(wkey, {})
+                    row.append(_fmt_val(w.get("value"), is_pct))
+                _rows.append(row)
+        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + names), use_container_width=True, hide_index=True)
+    st.caption("Usage data: nflverse — current season only.")
+
+
+def render_recent_games(enriched: list[dict]):
+    _section_heading("Recent Games")
+    _any = False
+    for p in enriched:
+        games = get_recent_games(p["name"], p["team"], p["position"], n=5)
+        if not games:
+            continue
+        _any = True
+        if len(enriched) > 1:
+            st.markdown(f"**{p['name']}**")
+        st.dataframe(pd.DataFrame(games), use_container_width=True, hide_index=True)
+    if not _any:
+        st.caption("No current-season game log available yet.")
+
+
 def render(supabase, now_utc):
-    st.markdown("## Lineup Comparison")
+    st.markdown("## Lineup Analysis")
     st.markdown(
         "<div style='opacity:0.7;font-size:0.95rem;margin:0 0 6px 0'>"
-        "Compare fantasy projections, player props, game environment, and matchup context side by side."
+        "Research weekly usage, player props, game environment, and matchup context for your fantasy lineup decisions."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -192,7 +264,7 @@ def render(supabase, now_utc):
 
     st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
 
-    _n_slots = st.session_state.get("lc_n_slots", 2)
+    _n_slots = st.session_state.get("lc_n_slots", 1)  # defaults to ONE player, not two
     _show_vs = _n_slots == 2
 
     if _show_vs:
@@ -204,6 +276,8 @@ def render(supabase, now_utc):
                 "opacity:0.4;font-size:0.8rem;font-weight:600;margin-top:34px'>VS</div>",
                 unsafe_allow_html=True,
             )
+    elif _n_slots == 1:
+        _player_cols = [st.container()]
     else:
         _player_cols = st.columns(_n_slots, gap="small")
 
@@ -211,23 +285,19 @@ def render(supabase, now_utc):
     for i, col in enumerate(_player_cols):
         with col:
             _p = render_player_selector(i, _mode, _n_slots)
-            if i == _n_slots - 1 and _n_slots > 2:
-                if st.button("Remove", key=f"lc_remove_{i}", use_container_width=True):
-                    st.session_state.pop(f"lc_selected_{i}", None)
-                    st.session_state["lc_n_slots"] = _n_slots - 1
-                    st.rerun()
             if _p:
                 _confirmed_players.append(_p)
 
     st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
-    _add_col, _ = st.columns([1.1, 4.9])
-    with _add_col:
-        if st.button("+ Add Player", disabled=_n_slots >= 4, key="lc_add"):
-            st.session_state["lc_n_slots"] = min(4, _n_slots + 1)
-            st.rerun()
+    if _confirmed_players:
+        _add_col, _ = st.columns([1.1, 4.9])
+        with _add_col:
+            if st.button("+ Add Player", disabled=_n_slots >= 4, key="lc_add"):
+                st.session_state["lc_n_slots"] = min(4, _n_slots + 1)
+                st.rerun()
 
-    if len(_confirmed_players) < 2:
-        st.caption("Select at least two players to begin comparing.")
+    if not _confirmed_players:
+        st.caption("Select a player to begin your lineup analysis.")
         return
 
     with st.spinner("Loading market data..."):
@@ -256,34 +326,22 @@ def render(supabase, now_utc):
     if not _all_markets or not _has_any_prop_value:
         st.caption("Player props are not available yet. Check back closer to kickoff.")
     else:
-        _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
-        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
+        if len(enriched) == 1:
+            _rows = [{"Prop": PROP_LABELS.get(m, m), "Line": enriched[0]["props"].get(m, "—")} for m in _all_markets]
+            st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+        else:
+            _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
+            st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
     # ── Usage & Role ────────────────────────────────────
-    _section_heading("Usage & Role")
-    positions = {p["position"] for p in enriched}
-    metrics = POSITION_METRICS.get(next(iter(positions)), []) if len(positions) == 1 else ["targets_per_game"]
-    usage_by_player = {p["name"]: get_player_usage(p["name"], p["team"], p["position"]) for p in enriched}
-    if not any(usage_by_player.values()):
-        st.caption("Usage data temporarily unavailable.")
-    else:
-        _rows = []
-        for m in metrics:
-            label = METRIC_LABELS.get(m, m)
-            is_pct = m in PERCENT_METRICS
-            season_row = [label + " — Season"]
-            role_row = [label + " — Current Role"]
-            for p in enriched:
-                u = usage_by_player.get(p["name"], {}).get(m, {})
-                sv, cv = u.get("season"), u.get("current_role")
-                season_row.append(f"{sv * 100:.0f}%" if (is_pct and sv is not None) else (f"{sv:.1f}" if sv is not None else "—"))
-                role_row.append(f"{cv * 100:.0f}%" if (is_pct and cv is not None) else (f"{cv:.1f}" if cv is not None else "—"))
-            _rows.append(season_row)
-            _rows.append(role_row)
-        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
-        st.caption("Usage data: nflverse")
+    render_usage_role(enriched, _names)
+
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+
+    # ── Recent Games ────────────────────────────────────
+    render_recent_games(enriched)
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
@@ -291,42 +349,41 @@ def render(supabase, now_utc):
     _has_env = any(p["context"] for p in enriched)
     if _has_env:
         _section_heading("Game Environment")
-        _env_metrics = [
-            ("Opponent", [p["context"].get("opponent") for p in enriched], None),
-            ("Spread", [p["context"].get("spread") for p in enriched], False),
-            ("Game Total", [p["context"].get("game_total") for p in enriched], True),
-            ("Team Implied Total", [p["context"].get("team_implied_total") for p in enriched], True),
-        ]
-        _rows = []
-        for label, vals, higher in _env_metrics:
-            _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
-        st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
+        if len(enriched) == 1:
+            ctx = enriched[0]["context"]
+            _env = {
+                "Opponent": ctx.get("opponent", "—"), "Home/Away": "Home" if ctx.get("is_home") else "Away",
+                "Spread": ctx.get("spread", "—"), "Game Total": ctx.get("game_total", "—"),
+                "Team Implied Total": ctx.get("team_implied_total", "—"),
+            }
+            st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
+        else:
+            _env_metrics = [
+                ("Opponent", [p["context"].get("opponent") for p in enriched], None),
+                ("Spread", [p["context"].get("spread") for p in enriched], False),
+                ("Game Total", [p["context"].get("game_total") for p in enriched], True),
+                ("Team Implied Total", [p["context"].get("team_implied_total") for p in enriched], True),
+            ]
+            _rows = []
+            for label, vals, higher in _env_metrics:
+                _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
+            st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
         st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
     # ── Opponent Defense ──────────────────────────────
     _section_heading("Opponent Defense")
-    _def_by_player = {}
-    for p in enriched:
-        opp = p["context"].get("opponent")
-        _def_by_player[p["name"]] = get_opponent_defense(opp, p["position"], _scoring)
+    _def_by_player = {p["name"]: get_opponent_defense(p["context"].get("opponent"), p["position"], _scoring) for p in enriched}
 
     if all(v is None for v in _def_by_player.values()):
         _any_bye = any(not p["context"].get("opponent") for p in enriched)
-        if _any_bye:
-            st.caption("No opponent this week for one or more selected players (bye week).")
-        else:
-            st.caption("Opponent defensive data is not available yet.")
+        st.caption("No opponent this week (bye week)." if _any_bye else "Opponent defensive data is not available yet.")
     else:
-        _headers = []
-        for p in enriched:
-            opp = p["context"].get("opponent")
-            _headers.append(f"{p['name']} vs {opp}" if opp else f"{p['name']} — Bye Week")
-
         positions_in_view = {p["position"] for p in enriched}
         metric_set = POSITION_DEFENSE_METRICS.get(next(iter(positions_in_view)), []) if len(positions_in_view) == 1 else []
         if not metric_set:
             st.caption("Select players at the same position to see matched defensive context.")
         else:
+            _headers = [f"{p['name']} vs {p['context'].get('opponent')}" if p["context"].get("opponent") else f"{p['name']} — Bye Week" for p in enriched]
             _rows = []
             for field, label in metric_set:
                 row = [label]
