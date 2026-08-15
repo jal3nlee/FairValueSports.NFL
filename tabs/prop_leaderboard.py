@@ -7,6 +7,7 @@ import pandas as pd
 from core.nfl_player_search import render_nfl_player_search
 from core.nfl_player_card import render_nfl_player_card
 from core.prop_hit_rate_dashboard import render_prop_hit_rate_dashboard
+from core.nfl_player_context import render_opponent_defense_single
 from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
@@ -14,7 +15,6 @@ from core.nflverse_data import (
     get_usage_samples, get_expanded_season_stats, get_recent_games,
     LINEUP_USAGE_METRICS, METRIC_LABELS, PERCENT_METRICS,
 )
-from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 from core.lineup_data import (
     get_team_game_context, fetch_player_props_for_event, get_consensus_prop_line, NFL_TEAMS,
 )
@@ -55,9 +55,6 @@ def _fmt_usage_val(v, is_pct):
     return f"{v * 100:.0f}%" if is_pct else f"{v:.1f}"
 
 
-# =======================
-# PROP LEADERBOARD SUBVIEW
-# =======================
 def render_leaderboard_view(supabase, now_utc):
     _c1, _c2, _c3, _c4 = st.columns([1.8, 1.2, 1.2, 1.6])
     with _c1:
@@ -105,9 +102,6 @@ def render_leaderboard_view(supabase, now_utc):
         st.caption("Pushes (exact line matches) are excluded from both hits and the sample denominator.")
 
 
-# =======================
-# PROP ANALYSIS (open by default)
-# =======================
 def _render_prop_analysis(player: dict, ctx: dict, supabase, now_utc):
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
@@ -201,11 +195,7 @@ def _render_prop_analysis(player: dict, ctx: dict, supabase, now_utc):
         st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
 
 
-# =======================
-# PLAYER CONTEXT (closed by default)
-# =======================
 def _render_player_context(player: dict, ctx: dict):
-    # ── Season Stats ────────────────────────────────
     st.markdown("#### Season Stats")
     expanded = get_expanded_season_stats(player["name"], player["team"], player["position"])
     if not expanded:
@@ -215,7 +205,6 @@ def _render_player_context(player: dict, ctx: dict):
 
     st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    # ── Recent Game Stats ────────────────────────────
     st.markdown("#### Recent Game Stats")
     metrics = LINEUP_USAGE_METRICS.get(player["position"], [])
     if metrics:
@@ -243,7 +232,6 @@ def _render_player_context(player: dict, ctx: dict):
 
     st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    # ── Opponent / Matchup Stats ─────────────────────
     st.markdown("#### Opponent / Matchup Stats")
     opponent = ctx.get("opponent")
     if not opponent:
@@ -259,20 +247,10 @@ def _render_player_context(player: dict, ctx: dict):
     st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
 
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-    _def = get_opponent_defense(opponent, player["position"], "PPR")
-    _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
-    if not _def or not _metric_set:
-        st.caption("Opponent defensive data is not available yet.")
-    else:
-        _header = f"{opponent} Defense vs {player['position']}"
-        _rows = [{"Metric": label, _header: _def.get(field, "—")} for field, label in _metric_set]
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
-        st.caption("Defensive data: nflverse")
+    # ── Shared renderer — same code Lineup Analysis uses. ──
+    render_opponent_defense_single(opponent, player["position"], "PPR")
 
 
-# =======================
-# PLAYER RESEARCH SUBVIEW
-# =======================
 def render_player_research_view(supabase, now_utc):
     st.markdown("### Player Search")
     player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
@@ -292,9 +270,6 @@ def render_player_research_view(supabase, now_utc):
         _render_player_context(player, ctx)
 
 
-# =======================
-# TOP-LEVEL RENDER
-# =======================
 def render(supabase, now_utc):
     st.markdown("## Prop Research")
     st.markdown(
