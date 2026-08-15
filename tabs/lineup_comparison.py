@@ -7,7 +7,6 @@ from core.lineup_data import (
     get_players_by_team,
     get_players_by_position,
     build_player_comparison,
-    generate_key_differences,
     PROP_LABELS,
     NFL_TEAMS,
     POSITIONS,
@@ -16,7 +15,6 @@ from core.lineup_data import (
 from core.nflverse_data import get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
-TREND_THRESHOLD = 0.15
 
 
 def _dash(v):
@@ -171,7 +169,6 @@ def render(supabase, now_utc):
         unsafe_allow_html=True,
     )
 
-    # ── Mode + Scoring, tight, not full width ──────────
     _tc1, _tc2, _spacer = st.columns([1.5, 1.5, 3], gap="small")
     with _tc1:
         _tight_label("Mode")
@@ -184,7 +181,6 @@ def render(supabase, now_utc):
 
     st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
 
-    # ── Player grid — VS only for exactly 2 players ────
     _n_slots = st.session_state.get("lc_n_slots", 2)
     _show_vs = _n_slots == 2
 
@@ -212,7 +208,6 @@ def render(supabase, now_utc):
             if _p:
                 _confirmed_players.append(_p)
 
-    # ── Shared, compact Add Player — not full width ────
     st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
     _add_col, _ = st.columns([1.1, 4.9])
     with _add_col:
@@ -243,11 +238,9 @@ def render(supabase, now_utc):
 
     _names = [p["name"] for p in enriched]
 
-    # ── Player Props — hide entirely if fully empty, per spec ──
+    # ── Player Props ──────────────────────────────────
     _all_markets = sorted(set(m for p in enriched for m in p["props"].keys()))
-    _has_any_prop_value = any(
-        p["props"].get(m) is not None for p in enriched for m in _all_markets
-    )
+    _has_any_prop_value = any(p["props"].get(m) is not None for p in enriched for m in _all_markets)
     _section_heading("Player Props")
     if not _all_markets or not _has_any_prop_value:
         st.caption("Player props are not available yet. Check back closer to kickoff.")
@@ -257,7 +250,7 @@ def render(supabase, now_utc):
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Usage & Role ────────────────────────────────────
+    # ── Usage & Role — no arrows, plain values only ────
     _section_heading("Usage & Role")
     positions = {p["position"] for p in enriched}
     metrics = POSITION_METRICS.get(next(iter(positions)), []) if len(positions) == 1 else ["targets_per_game"]
@@ -275,10 +268,7 @@ def render(supabase, now_utc):
                 u = usage_by_player.get(p["name"], {}).get(m, {})
                 sv, cv = u.get("season"), u.get("current_role")
                 season_row.append(f"{sv * 100:.0f}%" if (is_pct and sv is not None) else (f"{sv:.1f}" if sv is not None else "—"))
-                cv_str = f"{cv * 100:.0f}%" if (is_pct and cv is not None) else (f"{cv:.1f}" if cv is not None else "—")
-                if sv and cv and abs((cv - sv) / sv) >= TREND_THRESHOLD:
-                    cv_str += " ↑" if cv > sv else " ↓"
-                role_row.append(cv_str)
+                role_row.append(f"{cv * 100:.0f}%" if (is_pct and cv is not None) else (f"{cv:.1f}" if cv is not None else "—"))
             _rows.append(season_row)
             _rows.append(role_row)
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
@@ -300,20 +290,3 @@ def render(supabase, now_utc):
         for label, vals, higher in _env_metrics:
             _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
-        st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
-
-    # ── Key Differences ───────────────────────────────
-    _section_heading("Key Differences")
-    notes = generate_key_differences(enriched)
-    for p in enriched:
-        u = usage_by_player.get(p["name"], {})
-        for metric_key, meta in u.items():
-            if not isinstance(meta, dict):
-                continue
-            sv, cv = meta.get("season"), meta.get("current_role")
-            if sv and cv and abs((cv - sv) / sv) >= TREND_THRESHOLD:
-                direction = "risen" if cv > sv else "declined"
-                label = METRIC_LABELS.get(metric_key, metric_key).lower()
-                notes.append(f"{p['name']}'s {label} has {direction} recently ({sv} → {cv}).")
-    for note in notes[:6]:
-        st.markdown(f"- {note}")
