@@ -227,7 +227,7 @@ with st.sidebar.expander("How to use", expanded=False):
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
 4. **Lineup Comparison** — compare fantasy players side by side using real game odds and market props.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
-6. **Prop Leaderboard** — see which players have hit a prop threshold most often over recent games.
+6. **Prop Leaderboard** — find top hit-rate performers by prop threshold, or research one player's props directly.
 7. **Sportsbook Screener** — pure line shopping across every sportsbook.
 8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
         """
