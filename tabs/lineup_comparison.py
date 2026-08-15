@@ -1,4 +1,6 @@
 # tabs/lineup_comparison.py
+# User-facing name: "Lineup Analysis" — module filename kept as-is to
+# avoid unnecessary import-risk across the app.
 import streamlit as st
 import pandas as pd
 
@@ -6,7 +8,7 @@ from core.nfl_player_search import render_nfl_player_search
 from core.nfl_player_card import render_nfl_player_card
 from core.lineup_data import build_player_comparison, get_team_game_context, PROP_LABELS
 from core.nflverse_data import get_usage_samples, get_recent_games, LINEUP_USAGE_METRICS, METRIC_LABELS, PERCENT_METRICS
-from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
+from core.nfl_player_context import render_opponent_defense_single, render_opponent_defense_multi
 
 ROLES = ["Roster", "Bench", "Waiver"]
 
@@ -254,36 +256,23 @@ def render(supabase, now_utc):
             st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
         st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Opponent Defense — header now describes the DEFENSE, not the
-    # selected player (was misleadingly "Dak Prescott vs SEA"). ──────
+    # ── Opponent Defense — now via the SHARED renderer, same code
+    # Prop Research uses. Cannot take a player name, structurally. ──
     _section_heading("Opponent Defense")
-    st.markdown(
-        "<div style='opacity:0.6;font-size:0.85rem;margin:-4px 0 8px 0'>"
-        "Season defensive performance of each player's upcoming opponent.</div>",
-        unsafe_allow_html=True,
-    )
-    _def_by_player = {p["name"]: get_opponent_defense(p["context"].get("opponent"), p["position"], _scoring) for p in enriched}
-
-    if all(v is None for v in _def_by_player.values()):
-        _any_bye = any(not p["context"].get("opponent") for p in enriched)
-        st.caption("No opponent this week (bye week)." if _any_bye else "Opponent defensive data is not available yet.")
+    if len(enriched) == 1:
+        st.markdown(
+            "<div style='opacity:0.6;font-size:0.85rem;margin:-4px 0 8px 0'>"
+            "Season defensive performance of the player's upcoming opponent.</div>",
+            unsafe_allow_html=True,
+        )
+        render_opponent_defense_single(enriched[0]["context"].get("opponent"), enriched[0]["position"], _scoring)
     else:
-        positions_in_view = {p["position"] for p in enriched}
-        metric_set = POSITION_DEFENSE_METRICS.get(next(iter(positions_in_view)), []) if len(positions_in_view) == 1 else []
-        if not metric_set:
-            st.caption("Select players at the same position to see matched defensive context.")
-        else:
-            _pos = next(iter(positions_in_view))
-            _headers = []
-            for p in enriched:
-                opp = p["context"].get("opponent")
-                _headers.append(f"{opp} Defense vs {_pos}" if opp else "Bye Week")
-            _rows = []
-            for field, label in metric_set:
-                row = [label]
-                for p in enriched:
-                    d = _def_by_player.get(p["name"])
-                    row.append(_dash(d.get(field)) if d else "—")
-                _rows.append(row)
-            st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _headers), use_container_width=True, hide_index=True)
-        st.caption("Defensive data: nflverse")
+        st.markdown(
+            "<div style='opacity:0.6;font-size:0.85rem;margin:-4px 0 8px 0'>"
+            "Season defensive performance of each player's upcoming opponent.</div>",
+            unsafe_allow_html=True,
+        )
+        render_opponent_defense_multi(
+            [{"name": p["name"], "position": p["position"], "opponent": p["context"].get("opponent")} for p in enriched],
+            _scoring,
+        )
