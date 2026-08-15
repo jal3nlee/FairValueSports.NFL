@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 
 from core.nfl_player_search import render_nfl_player_search
+from core.nfl_player_card import render_nfl_player_card
 from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
@@ -96,7 +97,7 @@ def render_leaderboard_view(supabase, now_utc):
 
 
 # =======================
-# PLAYER SEARCH SUBVIEW — tightened layout
+# PLAYER SEARCH SUBVIEW
 # =======================
 def render_player_search_view(supabase, now_utc):
     player = render_nfl_player_search("ps_slot", allowed_positions=["QB", "RB", "WR", "TE"])
@@ -104,31 +105,11 @@ def render_player_search_view(supabase, now_utc):
         st.caption("No eligible players for this team/position.")
         return
 
-    # ── Player identity — tightened spacing ──────────────
-    _photo_col, _info_col = st.columns([0.7, 3.6])
-    with _photo_col:
-        if player.get("headshot_url"):
-            st.markdown(
-                f"<img src='{player['headshot_url']}' style='width:64px;height:64px;object-fit:contain;"
-                f"margin-top:2px'/>",
-                unsafe_allow_html=True,
-            )
-    with _info_col:
-        st.markdown(
-            f"<div style='font-weight:700;font-size:1rem;line-height:1.2;margin-top:4px'>{player['name']}</div>"
-            f"<div style='opacity:0.65;font-size:0.85rem;line-height:1.3'>{player['position']} · {player['team']}</div>",
-            unsafe_allow_html=True,
-        )
-
     ctx = get_team_game_context(supabase, player["team"], now_utc)
-    if ctx.get("opponent"):
-        _side_lbl = "vs" if ctx.get("is_home") else "@"
-        st.markdown(
-            f"<div style='opacity:0.6;font-size:0.8rem;margin:0 0 6px 0'>{_side_lbl} {ctx['opponent']}</div>",
-            unsafe_allow_html=True,
-        )
+    render_nfl_player_card(player, ctx, compact=True)
 
-    # ── Stat | Prop Line | Over/Under — one compact row ──
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+
     _available = [s for s, positions in PROP_POSITION_MAP.items() if player["position"] in positions]
     if player["position"] in ("WR", "TE", "RB"):
         _available = _available + list(PLAYER_SEARCH_EXTRA_STATS.keys())
@@ -160,7 +141,6 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
-    # ── Current Market — compact, secondary when empty ──
     st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 2px 0'>Current Market</div>", unsafe_allow_html=True)
     if not odds_market_key:
         st.caption(f"{_picked_label} isn't tracked by sportsbooks — research the line above manually.")
@@ -185,7 +165,6 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
 
-    # ── Historical Hit Rates — the primary output ────────
     st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 4px 0'>Historical Hit Rates</div>", unsafe_allow_html=True)
     _full_log = get_player_game_log(player["name"], player["team"], stat_field, n_games=None)
     if not _full_log:
@@ -212,7 +191,6 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    # ── Usage & Role ────────────────────────────────────
     st.markdown("### Usage & Role")
     usage = get_player_usage(player["name"], player["team"], player["position"])
     metrics = POSITION_METRICS.get(player["position"], [])
@@ -233,7 +211,6 @@ def render_player_search_view(supabase, now_utc):
         st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
         st.caption("Usage data: nflverse")
 
-    # ── Game Environment ─────────────────────────────────
     if ctx:
         st.markdown("### Game Environment")
         _env = {
@@ -243,7 +220,6 @@ def render_player_search_view(supabase, now_utc):
         }
         st.dataframe(pd.DataFrame([_env]), use_container_width=True, hide_index=True)
 
-    # ── Opponent Defense ──────────────────────────────
     st.markdown("### Opponent Defense")
     _def = get_opponent_defense(ctx.get("opponent"), player["position"], "PPR")
     _metric_set = POSITION_DEFENSE_METRICS.get(player["position"], [])
@@ -257,9 +233,6 @@ def render_player_search_view(supabase, now_utc):
         st.caption("Defensive data: nflverse")
 
 
-# =======================
-# TOP-LEVEL RENDER — unchanged
-# =======================
 def render(supabase, now_utc):
     st.markdown("## Prop Leaderboard")
     st.markdown(
