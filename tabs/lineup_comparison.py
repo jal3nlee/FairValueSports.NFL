@@ -45,8 +45,8 @@ def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
 
 def render_selected_player_header(p: dict, mode: str, slot_idx: int):
     ctx = p.get("context", {})
-    _photo_col, _info_col = st.columns([0.8, 3.2]) if p.get("headshot_url") else (None, None)
     if p.get("headshot_url"):
+        _photo_col, _info_col = st.columns([0.8, 3.2])
         with _photo_col:
             st.image(p["headshot_url"], width=56)
         with _info_col:
@@ -134,11 +134,16 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
         _p = render_team_position_search(slot_idx, _allowed, _taken)
 
     if _p and _p["name"] not in _taken:
-        _role = "Roster"
         if mode == "Waiver":
             _role = st.selectbox("Role", ROLES, key=f"lc_role_{slot_idx}")
-        _p["role"] = _role
-        if st.button("Confirm", key=f"lc_confirm_{slot_idx}", use_container_width=True):
+            _p["role"] = _role
+            if st.button("Confirm", key=f"lc_confirm_{slot_idx}", use_container_width=True):
+                st.session_state[f"lc_selected_{slot_idx}"] = _p
+                st.rerun()
+        else:
+            # No role to pick outside Waiver mode — the selection itself
+            # is the confirmation, no extra click needed.
+            _p["role"] = "Roster"
             st.session_state[f"lc_selected_{slot_idx}"] = _p
             st.rerun()
     return None
