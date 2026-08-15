@@ -58,11 +58,14 @@ DEBUG_LINEUP = True  # temporary — remove once search is confirmed working
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_search_players(query: str) -> list[dict]:
-    """Search NFL players via ESPN's public site API. Free, unofficial, no key."""
+    """Search NFL players via ESPN's public site API. Free, unofficial, no key.
+
+    Confirmed response shape (live-tested): payload['items'] is a FLAT list
+    of player objects — no nested 'results' array. Each item has at least
+    'id', 'displayName', 'type'. Team/position field names not yet confirmed.
+    """
     if DEBUG_LINEUP:
-        # Unconditional marker — prints on EVERY call regardless of outcome,
-        # so we know for certain this exact file is the one actually running.
-        st.warning(f"debug: espn_search_players() called with query={query!r} — build marker v2")
+        st.warning(f"debug: espn_search_players() called with query={query!r} — build marker v3")
 
     if not query or len(query.strip()) < 2:
         return []
@@ -79,21 +82,29 @@ def espn_search_players(query: str) -> list[dict]:
                 st.error(f"debug: ESPN search returned status {r.status_code} — {r.text[:300]}")
             return []
         payload = r.json()
-        if DEBUG_LINEUP:
-            st.caption(f"debug: ESPN search top-level keys = {list(payload.keys())}")
+
         results = []
         for item in payload.get("items", []):
-            for res in item.get("results", []):
-                if res.get("type") != "player":
-                    continue
-                results.append({
-                    "id": res.get("uid", res.get("id")),
-                    "name": res.get("displayName", ""),
-                    "team": (res.get("subtitle") or "").strip(),
-                    "position": (res.get("description") or "").strip(),
-                })
-        if DEBUG_LINEUP and not results:
-            st.caption(f"debug: ESPN search returned 0 parsed players — raw payload sample: {str(payload)[:600]}")
+            if item.get("type") != "player":
+                continue
+            if DEBUG_LINEUP and not results:
+                # Short, safe — won't get truncated the way a raw dump did.
+                st.caption(f"debug: first player item keys = {list(item.keys())}")
+                st.caption(
+                    f"debug: candidate team/position fields — "
+                    f"team={item.get('team')!r} teamName={item.get('teamName')!r} "
+                    f"teamAbbreviation={item.get('teamAbbreviation')!r} "
+                    f"subtitle={item.get('subtitle')!r} description={item.get('description')!r} "
+                    f"position={item.get('position')!r}"
+                )
+            results.append({
+                "id": item.get("id"),
+                "name": item.get("displayName", ""),
+                "team": item.get("teamAbbreviation") or item.get("teamName") or item.get("team") or item.get("subtitle") or "",
+                "position": item.get("position") or item.get("description") or "",
+            })
+        if DEBUG_LINEUP:
+            st.caption(f"debug: parsed {len(results)} player(s)")
         return results
     except Exception as e:
         if DEBUG_LINEUP:
