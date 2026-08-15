@@ -227,7 +227,9 @@ with st.sidebar.expander("How to use", expanded=False):
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
 4. **Lineup Analysis** — research weekly usage, props, game environment, and matchup context for one player, or compare up to four.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
-6. **Prop Leaderboard** — find top hit-rate performers by prop threshold, or research one player's props directly.
+6. **Prop Research** — research an individual player's props, season stats, recent
+   games, and matchup context directly, or find the top players on the best current
+   hit-rate streak for a selected prop.
 7. **Sportsbook Screener** — pure line shopping across every sportsbook.
 8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
         """
@@ -299,7 +301,7 @@ def run_app():
         "Matchup Center",
         "Lineup Analysis",
         "Fantasy Draft",
-        "Prop Leaderboard",
+        "Prop Research",
         "Sportsbook Screener",
         "Parlay Builder",
     ])
