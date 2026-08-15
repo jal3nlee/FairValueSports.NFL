@@ -53,25 +53,20 @@ NFL_TEAMS = {
 POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"]
 FLEX_POSITIONS = ["RB", "WR", "TE"]
 
-DEBUG_LINEUP = True  # temporary — remove once search is confirmed working
+DEBUG_PHOTOS = True  # temporary — confirms headshot field shape, remove once known
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_search_players(query: str) -> list[dict]:
-    """Search NFL players via ESPN's public site API. Free, unofficial, no key.
-
-    Confirmed live: payload['items'] is a FLAT list of player objects (no
-    nested 'results'). Confirmed keys present: id, uuid, guid, displayName,
-    shortName, type, sport, league, leagueRelationships, teamRelationships,
-    jersey, relevance, isActive, isRetired, defaultLeagueSlug, label, uid,
-    headshot, links, includeSponsor, showKey, isLocked.
-    Team/position extraction NOT yet confirmed — likely inside
-    teamRelationships (nested) or possibly 'label' (a display string).
-    Still debugging both before finalizing the parse.
     """
-    if DEBUG_LINEUP:
-        st.warning(f"debug: espn_search_players() called with query={query!r} — build marker v4")
+    Search NFL players via ESPN's public site API. Free, unofficial, no key.
 
+    Confirmed live shape: payload['items'] is a FLAT list of player objects.
+    Team info lives at item['teamRelationships'][0]['core'] (abbreviation,
+    displayName). Position is NOT returned — backfilled via roster lookup.
+    A 'headshot' key is confirmed present on each item; its inner shape
+    (dict with 'href', or a bare URL) isn't confirmed yet — debugged below.
+    """
     if not query or len(query.strip()) < 2:
         return []
     try:
@@ -80,11 +75,7 @@ def espn_search_players(query: str) -> list[dict]:
             params={"query": query.strip(), "limit": 10, "type": "player", "sport": "football", "league": "nfl"},
             timeout=10,
         )
-        if DEBUG_LINEUP:
-            st.caption(f"debug: HTTP status = {r.status_code}")
         if r.status_code != 200:
-            if DEBUG_LINEUP:
-                st.error(f"debug: ESPN search returned status {r.status_code} — {r.text[:300]}")
             return []
         payload = r.json()
 
@@ -92,50 +83,78 @@ def espn_search_players(query: str) -> list[dict]:
         for item in payload.get("items", []):
             if item.get("type") != "player":
                 continue
-            if DEBUG_LINEUP and not results:
-                st.caption(f"debug: teamRelationships = {item.get('teamRelationships')}")
-                st.caption(f"debug: label = {item.get('label')!r}")
-                st.caption(f"debug: jersey = {item.get('jersey')!r}")
+            if DEBUG_PHOTOS and not results:
+                st.caption(f"debug: headshot raw value = {item.get('headshot')!r}")
+
+            team_rel = (item.get("teamRelationships") or [{}])[0]
+            core = team_rel.get("core", {})
+            team_abbr = core.get("abbreviation", "")
+            team_name = core.get("displayName", "")
+
+            headshot_raw = item.get("headshot")
+            headshot_url = (
+                headshot_raw.get("href") if isinstance(headshot_raw, dict)
+                else headshot_raw if isinstance(headshot_raw, str)
+                else None
+            )
+
             results.append({
                 "id": item.get("id"),
                 "name": item.get("displayName", ""),
-                "team": "",      # left blank until the debug output above confirms the real source
-                "position": "",  # this endpoint may not carry position at all — TBD
+                "team": team_name,
+                "team_abbr": team_abbr,
+                "position": "",  # backfilled below
+                "headshot_url": headshot_url,
             })
-        if DEBUG_LINEUP:
-            st.caption(f"debug: parsed {len(results)} player(s)")
+
+        for res in results:
+            if res["team_abbr"]:
+                roster = get_players_by_team(res["team_abbr"])
+                match = next(
+                    (p for p in roster if p["name"].strip().lower() == res["name"].strip().lower()), None,
+                )
+                if match:
+                    res["position"] = match.get("position", "")
+                    if not res["headshot_url"]:
+                        res["headshot_url"] = match.get("headshot_url")
         return results
-    except Exception as e:
-        if DEBUG_LINEUP:
-            st.error(f"debug: espn_search_players failed — {type(e).__name__}: {e}")
+    except Exception:
         return []
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_players_by_team(team_abbr: str) -> list[dict]:
-    """Full roster for one team — used by Browse Team."""
+    """Full roster for one team — used by Browse Team, and by espn_search_players above."""
     try:
         r = requests.get(
             f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_abbr}/roster",
             timeout=10,
         )
         if r.status_code != 200:
-            if DEBUG_LINEUP:
-                st.error(f"debug: ESPN roster returned status {r.status_code} for team={team_abbr}")
             return []
         out = []
+        _debug_shown = False
         for group in r.json().get("athletes", []):
             for p in group.get("items", []):
+                if DEBUG_PHOTOS and not _debug_shown:
+                    st.caption(f"debug: roster player keys = {list(p.keys())}")
+                    st.caption(f"debug: roster headshot raw value = {p.get('headshot')!r}")
+                    _debug_shown = True
+                headshot_raw = p.get("headshot")
+                headshot_url = (
+                    headshot_raw.get("href") if isinstance(headshot_raw, dict)
+                    else headshot_raw if isinstance(headshot_raw, str)
+                    else None
+                )
                 out.append({
                     "id": p.get("id"),
                     "name": p.get("fullName", ""),
                     "position": (p.get("position") or {}).get("abbreviation", ""),
                     "team": team_abbr,
+                    "headshot_url": headshot_url,
                 })
         return out
-    except Exception as e:
-        if DEBUG_LINEUP:
-            st.error(f"debug: get_players_by_team failed — {type(e).__name__}: {e}")
+    except Exception:
         return []
 
 
