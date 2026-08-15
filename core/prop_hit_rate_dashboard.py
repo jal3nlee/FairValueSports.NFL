@@ -1,9 +1,9 @@
 # core/prop_hit_rate_dashboard.py
 # Shared "Prop Hit Rate" dashboard — ported from MLB Player Research's
 # existing Prop Hit Rate card (hit rate, hit count, average, streak,
-# Last 5 reference, hit/miss bar chart with threshold line). MLB's own
-# file is untouched; this is a new component NFL calls into, built to
-# visually/functionally mirror it.
+# hit/miss bar chart with threshold line). MLB's own file is untouched;
+# this is a new component NFL calls into, built to visually/functionally
+# mirror it.
 import streamlit as st
 import pandas as pd
 
@@ -67,13 +67,6 @@ def render_prop_hit_rate_dashboard(
 
     streak_count, streak_type = _current_streak(game_log_newest_first, line, side)
 
-    last5 = game_log_newest_first[:5]
-    last5_hits = sum(1 for g in last5 if (g[value_key] > line if side == "Over" else g[value_key] < line))
-    last5_decided = sum(
-        1 for g in last5
-        if g[value_key] != line
-    )
-
     with st.container(border=True):
         st.markdown(
             f"<div style='font-size:0.85rem;opacity:0.65;letter-spacing:0.04em;"
@@ -101,8 +94,6 @@ def render_prop_hit_rate_dashboard(
                 _m2.metric("Current streak", f"{streak_count} {_streak_word}")
             else:
                 _m2.metric("Current streak", "—")
-            if last5_decided > 0:
-                st.caption(f"Last 5 hit rate: {last5_hits / last5_decided * 100:.0f}% ({last5_hits}/{last5_decided})")
 
         st.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
         try:
