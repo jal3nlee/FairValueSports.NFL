@@ -28,6 +28,7 @@ METRIC_LABELS = {
     "receptions_per_game":     "Receptions / Game",
     "rush_yards_per_game":     "Rushing Yards / Game",
     "passing_tds_per_game":    "Passing TDs / Game",
+    "completions_per_game":    "Completions / Game",
 }
 PERCENT_METRICS = {"target_share", "carry_share"}
 
@@ -57,6 +58,22 @@ CARD_METRIC_LABELS = {
     "total_tds_per_game":       "TD/G",
 }
 
+# Player Context's expanded Season Stats subsection — a slightly wider
+# metric set than the card/Usage&Role tables, purely additive detail.
+# Derived ratios (Comp %, YPC, Yds/Rec) are computed at display time from
+# these same per-game season averages — mathematically equivalent to the
+# true season totals ratio, since the games-count cancels out.
+EXPANDED_SEASON_METRICS = {
+    "QB": ["attempts_per_game", "completions_per_game", "passing_yards_per_game",
+           "passing_tds_per_game", "interceptions_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
+    "RB": ["carries_per_game", "rush_yards_per_game", "total_tds_per_game",
+           "targets_per_game", "receptions_per_game", "receiving_yards_per_game"],
+    "WR": ["targets_per_game", "target_share", "receptions_per_game",
+           "receiving_yards_per_game", "receiving_tds_per_game"],
+    "TE": ["targets_per_game", "target_share", "receptions_per_game",
+           "receiving_yards_per_game", "receiving_tds_per_game"],
+}
+
 _METRIC_FIELD = {
     "targets_per_game": "targets",
     "target_share": "target_share",
@@ -72,6 +89,7 @@ _METRIC_FIELD = {
     "interceptions_per_game": "passing_interceptions",
     "receiving_tds_per_game": "receiving_tds",
     "total_tds_per_game": "_total_td",
+    "completions_per_game": "completions",
 }
 
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
@@ -183,8 +201,6 @@ def get_current_season() -> int:
 
 
 def _week_label(week, season, current_season):
-    """Current-season games: 'W8'. Prior-season games: 'W17 2025'.
-    Uses the game's own recorded season, never inferred from week number."""
     if season is not None and current_season is not None and season != current_season:
         return f"W{week} {season}"
     return f"W{week}"
@@ -369,13 +385,52 @@ def get_card_season_stats(player_name: str, team_full_name: str, position: str) 
     return out
 
 
+def get_expanded_season_stats(player_name: str, team_full_name: str, position: str) -> dict:
+    """
+    Player Context's Season Stats subsection — a wider metric set than
+    the card, reusing get_usage_samples's same engine. Derived ratios
+    (Comp %, YPC, Yds/Rec) are computed here from per-game season
+    averages, mathematically equal to the true season-total ratio.
+    Returns {} if no current-season data exists.
+    """
+    metric_list = EXPANDED_SEASON_METRICS.get(position, [])
+    if not metric_list:
+        return {}
+    samples = get_usage_samples(player_name, team_full_name, position, metrics=metric_list)
+    if not samples or samples.get("games_played", 0) == 0:
+        return {}
+
+    row = {"Games": samples["games_played"]}
+    for m in metric_list:
+        val = samples.get(m, {}).get("season", {}).get("value")
+        label = METRIC_LABELS.get(m, m)
+        if m in PERCENT_METRICS:
+            row[label] = f"{val * 100:.0f}%" if val is not None else "—"
+        else:
+            row[label] = val if val is not None else "—"
+
+    def _get(m):
+        return samples.get(m, {}).get("season", {}).get("value")
+
+    if position == "QB":
+        att, comp = _get("attempts_per_game"), _get("completions_per_game")
+        row["Comp %"] = f"{comp / att * 100:.1f}%" if att and comp is not None else "—"
+    elif position == "RB":
+        car, ry = _get("carries_per_game"), _get("rush_yards_per_game")
+        row["YPC"] = round(ry / car, 1) if car and ry is not None else "—"
+    elif position in ("WR", "TE"):
+        rec, ry = _get("receptions_per_game"), _get("receiving_yards_per_game")
+        row["Yds/Rec"] = round(ry / rec, 1) if rec and ry is not None else "—"
+
+    return row
+
+
 def get_recent_games(player_name: str, team_full_name: str, position: str, n: int = 5) -> list[dict]:
     """
-    Returns rows with a "Week" label already season-aware ('W8' for the
-    current season, 'W17 2025' for a prior one). NOTE: this function only
-    ever fetches the current season internally today — no cross-season
-    fetch exists yet — so every label will currently render plain 'W#'.
-    The labeling logic is correct and ready for if/when that changes.
+    Returns rows with a season-aware "Week" label ('W8' current season,
+    'W17 2025' prior season). This function only fetches the current
+    season internally — no cross-season fetch exists yet — so labels
+    currently always render plain 'W#'; ready if that ever changes.
     """
     if not _NFLVERSE_AVAILABLE:
         return []
@@ -398,18 +453,18 @@ def get_recent_games(player_name: str, team_full_name: str, position: str, n: in
             if position in ("WR", "TE"):
                 row.update({
                     "Targets": r.get("targets"), "Receptions": r.get("receptions"),
-                    "Receiving Yards": r.get("receiving_yards"),
+                    "Receiving Yards": r.get("receiving_yards"), "TD": r.get("receiving_tds"),
                 })
             elif position == "RB":
                 row.update({
                     "Carries": r.get("carries"), "Rush Yards": r.get("rushing_yards"),
-                    "Targets": r.get("targets"), "Receptions": r.get("receptions"),
+                    "Targets": r.get("targets"), "Receptions": r.get("receptions"), "Rec Yds": r.get("receiving_yards"),
                 })
             elif position == "QB":
                 row.update({
                     "Pass Att": r.get("attempts"), "Pass Yds": r.get("passing_yards"),
-                    "Pass TD": r.get("passing_tds"), "Rush Att": r.get("carries"),
-                    "Rush Yds": r.get("rushing_yards"),
+                    "Pass TD": r.get("passing_tds"), "INT": r.get("passing_interceptions"),
+                    "Rush Att": r.get("carries"), "Rush Yds": r.get("rushing_yards"),
                 })
             out.append(row)
         return out
