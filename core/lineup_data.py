@@ -59,6 +59,11 @@ DEBUG_LINEUP = True  # temporary — remove once search is confirmed working
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_search_players(query: str) -> list[dict]:
     """Search NFL players via ESPN's public site API. Free, unofficial, no key."""
+    if DEBUG_LINEUP:
+        # Unconditional marker — prints on EVERY call regardless of outcome,
+        # so we know for certain this exact file is the one actually running.
+        st.warning(f"debug: espn_search_players() called with query={query!r} — build marker v2")
+
     if not query or len(query.strip()) < 2:
         return []
     try:
@@ -67,11 +72,15 @@ def espn_search_players(query: str) -> list[dict]:
             params={"query": query.strip(), "limit": 10, "type": "player", "sport": "football", "league": "nfl"},
             timeout=10,
         )
+        if DEBUG_LINEUP:
+            st.caption(f"debug: HTTP status = {r.status_code}")
         if r.status_code != 200:
             if DEBUG_LINEUP:
                 st.error(f"debug: ESPN search returned status {r.status_code} — {r.text[:300]}")
             return []
         payload = r.json()
+        if DEBUG_LINEUP:
+            st.caption(f"debug: ESPN search top-level keys = {list(payload.keys())}")
         results = []
         for item in payload.get("items", []):
             for res in item.get("results", []):
@@ -81,8 +90,10 @@ def espn_search_players(query: str) -> list[dict]:
                     "id": res.get("uid", res.get("id")),
                     "name": res.get("displayName", ""),
                     "team": (res.get("subtitle") or "").strip(),
-                    "position": (res.get("description") or "").strip(),  # best-effort — not confirmed reliable
+                    "position": (res.get("description") or "").strip(),
                 })
+        if DEBUG_LINEUP and not results:
+            st.caption(f"debug: ESPN search returned 0 parsed players — raw payload sample: {str(payload)[:600]}")
         return results
     except Exception as e:
         if DEBUG_LINEUP:
@@ -119,7 +130,6 @@ def get_players_by_team(team_abbr: str) -> list[dict]:
 
 
 def get_players_by_position(team_abbr: str, position: str) -> list[dict]:
-    """Roster for a team filtered to one position, or all if position == 'All'."""
     roster = get_players_by_team(team_abbr)
     if position == "All":
         return roster
@@ -163,12 +173,6 @@ def get_team_game_context(supabase, team_name: str, now_utc) -> dict:
 
 
 def calculate_team_implied_total(game_total: float | None, team_spread: float | None):
-    """
-    team_implied = (game_total / 2) - (team_spread / 2)
-    Worked example: total=49.5, this team favored by 4.5 (spread=-4.5):
-        implied = 24.75 - (-2.25) = 27.0
-    Opponent, spread=+4.5: implied = 24.75 - 2.25 = 22.5   (27.0 + 22.5 = 49.5, checks out)
-    """
     if game_total is None or team_spread is None:
         return None
     return round((game_total / 2) - (team_spread / 2), 1)
@@ -236,7 +240,6 @@ def build_player_comparison(supabase, players: list[dict], now_utc) -> list[dict
 
 
 def generate_key_differences(enriched_players: list[dict]) -> list[str]:
-    """Deterministic, data-driven observations only — never a start/sit verdict."""
     notes = []
     totals = [(p["name"], p["context"].get("team_implied_total")) for p in enriched_players if p["context"].get("team_implied_total") is not None]
     if len(totals) >= 2:
