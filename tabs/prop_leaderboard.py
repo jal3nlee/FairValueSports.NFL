@@ -4,10 +4,11 @@ import pandas as pd
 
 from core.nfl_player_search import render_nfl_player_search
 from core.nfl_player_card import render_nfl_player_card
+from core.prop_hit_rate_dashboard import render_prop_hit_rate_dashboard
 from core.nflverse_data import (
     PROP_STAT_MAP, PROP_POSITION_MAP, PROP_AVG_LABEL, SAMPLE_OPTIONS,
     PLAYER_SEARCH_EXTRA_STATS, PROP_LABEL_TO_ODDS_MARKET,
-    build_prop_leaderboard, get_player_game_log, calculate_hit_rate,
+    build_prop_leaderboard, get_player_game_log,
     get_player_usage, POSITION_METRICS, METRIC_LABELS, PERCENT_METRICS,
 )
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
@@ -117,7 +118,7 @@ def render_player_search_view(supabase, now_utc):
         st.info("No supported prop stats for this position.")
         return
 
-    _sc1, _sc2, _sc3 = st.columns([1.35, 0.9, 0.75], gap="small")
+    _sc1, _sc2, _sc3, _sc4 = st.columns([1.3, 0.75, 0.85, 1.1], gap="small")
     with _sc1:
         _picked_label = st.selectbox("Stat", _available, key="ps_stat_pick", label_visibility="collapsed")
     stat_field = PROP_STAT_MAP.get(_picked_label) or PLAYER_SEARCH_EXTRA_STATS.get(_picked_label)
@@ -130,17 +131,23 @@ def render_player_search_view(supabase, now_utc):
         consensus_line = get_consensus_prop_line(prop_rows, player["name"], odds_market_key)
 
     with _sc2:
+        _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
+                                      key="ps_side", label_visibility="collapsed") or "Over"
+    with _sc3:
         _threshold = st.number_input(
             "Prop Line", min_value=0.0,
             value=float(consensus_line) if consensus_line is not None else 0.5,
             step=0.5, key="ps_threshold", label_visibility="collapsed",
         )
-    with _sc3:
-        _side = st.segmented_control("Side", ["Over", "Under"], default="Over",
-                                      key="ps_side", label_visibility="collapsed") or "Over"
+    with _sc4:
+        _sample_label = st.selectbox(
+            "Sample", ["Last 5 Games", "Last 10 Games", "Season"], index=1,
+            key="ps_sample", label_visibility="collapsed",
+        )
 
     st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
+    # ── Current Market ─────────────────────────────────
     st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 2px 0'>Current Market</div>", unsafe_allow_html=True)
     if not odds_market_key:
         st.caption(f"{_picked_label} isn't tracked by sportsbooks — research the line above manually.")
@@ -163,22 +170,21 @@ def render_player_search_view(supabase, now_utc):
         else:
             st.caption("No individual sportsbook prices available for this market yet.")
 
-    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='font-size:1.05rem;font-weight:700;margin:0 0 4px 0'>Historical Hit Rates</div>", unsafe_allow_html=True)
+    # ── Prop Hit Rate — shared dashboard, same engine as Leaderboard ──
+    st.markdown("## Prop Hit Rate")
+    st.caption("See how often this player has cleared the selected prop line.")
+
+    _sample_n = {"Last 5 Games": 5, "Last 10 Games": 10, "Season": None}[_sample_label]
     _full_log = get_player_game_log(player["name"], player["team"], stat_field, n_games=None)
-    if not _full_log:
-        st.caption("No current-season game log available yet for this player.")
-    else:
-        _windows = [("Season", _full_log), ("Last 10", _full_log[:10]), ("Last 5", _full_log[:5])]
-        _hc = st.columns(len(_windows), gap="small")
-        for col, (label, log) in zip(_hc, _windows):
-            hr = calculate_hit_rate(log, _threshold, _side)
-            with col:
-                st.metric(label, f"{hr['hits']} / {hr['total']} — {hr['hits']/hr['total']*100:.0f}%" if hr else "—")
+    _dashboard_log = _full_log[:_sample_n] if _sample_n else _full_log
 
-        st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-        st.markdown("**Recent Results**")
+    render_prop_hit_rate_dashboard(_picked_label, _side, _threshold, _dashboard_log, _sample_label)
+
+    if _full_log:
+        st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+        st.markdown("### Recent Results")
         st.caption("Line = your selected research line, not a historical sportsbook line.")
         _log_rows = [
             {
@@ -191,6 +197,7 @@ def render_player_search_view(supabase, now_utc):
 
     st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
+    # ── Usage & Role ────────────────────────────────────
     st.markdown("### Usage & Role")
     usage = get_player_usage(player["name"], player["team"], player["position"])
     metrics = POSITION_METRICS.get(player["position"], [])
