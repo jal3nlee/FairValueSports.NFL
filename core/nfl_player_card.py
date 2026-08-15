@@ -1,10 +1,13 @@
 # core/nfl_player_card.py
-# Shared, compact "profile header" card for a selected NFL player —
-# identity + this-week context only. No analytics, no recommendations.
+# Shared, compact NFL player identity card: headshot, name, position/team,
+# opponent + game time (or Bye Week), and — non-compact only — a 3-stat
+# position-relevant season snapshot. No betting-market data (spread,
+# game total, team total) anymore; that lives in Game Environment.
 import streamlit as st
 
 from core.odds_math import parse_iso_dt_utc, EASTERN
 from core.lineup_data import NFL_TEAMS
+from core.nflverse_data import get_card_season_stats
 
 _ABBR = {full: abbr.upper() for full, abbr in NFL_TEAMS.items()}
 
@@ -23,14 +26,23 @@ def _fmt_game_time(commence_iso: str | None) -> str | None:
     return et.strftime("%a %I:%M %p ET").replace(" 0", " ")
 
 
-def render_nfl_player_card(player: dict, context: dict | None = None, compact: bool = False):
+def render_nfl_player_card(
+    player: dict,
+    context: dict | None = None,
+    compact: bool = False,
+    spread: float | None = None,      # accepted for call-site compatibility, no longer rendered
+    game_total: float | None = None,  # accepted for call-site compatibility, no longer rendered
+    team_total: float | None = None,  # accepted for call-site compatibility, no longer rendered
+):
     """
     player: {"name", "team", "position", "headshot_url"} — team is the
-    full display name (e.g. "Minnesota Vikings"), abbreviated here for display.
-    context: the dict from core.lineup_data.get_team_game_context(), or
+    full display name, abbreviated here for display.
+    context: dict from core.lineup_data.get_team_game_context(), or
     None/{} for a bye week / context not yet available.
-    compact=True omits the game-context chips (used in Prop Leaderboard's
-    Player Search, where the next action is the prop controls, not context).
+    compact=True: identity + opponent only (Prop Leaderboard's Player
+    Search) — no season-stat row. compact=False (Lineup Analysis):
+    adds a 3-stat season snapshot, reusing the exact same season
+    calculation Usage & Role uses, when the player has current-season games.
     """
     context = context or {}
     team_abbr = _team_abbr(player.get("team", ""))
@@ -46,17 +58,7 @@ def render_nfl_player_card(player: dict, context: dict | None = None, compact: b
     elif "opponent" in context:  # context was fetched but genuinely empty -> bye week
         opp_line = "Bye Week"
 
-    chips = []
-    if not compact and opponent:
-        spread = context.get("spread")
-        game_total = context.get("game_total")
-        team_total = context.get("team_implied_total")
-        if team_total is not None:
-            chips.append(f"Team Total {team_total:g}")
-        if spread is not None:
-            chips.append(f"Spread {spread:+g}")
-        if game_total is not None:
-            chips.append(f"Game Total {game_total:g}")
+    season_stats = [] if compact else get_card_season_stats(player["name"], player.get("team", ""), player.get("position", ""))
 
     headshot_size = 80 if not compact else 64  # single value each — no real desktop/mobile breakpoint in Streamlit
 
@@ -87,8 +89,9 @@ def render_nfl_player_card(player: dict, context: dict | None = None, compact: b
                     f"<div style='opacity:0.6;font-size:0.8rem;margin-top:1px'>{opp_line}</div>",
                     unsafe_allow_html=True,
                 )
-            if chips:
+            if season_stats:
+                _stat_str = "   ·   ".join(f"{s['label']} {s['value']:g}" for s in season_stats)
                 st.markdown(
-                    f"<div style='opacity:0.75;font-size:0.8rem;margin-top:4px'>{'   ·   '.join(chips)}</div>",
+                    f"<div style='opacity:0.75;font-size:0.8rem;margin-top:4px'>{_stat_str}</div>",
                     unsafe_allow_html=True,
                 )
