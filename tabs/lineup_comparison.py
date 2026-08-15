@@ -32,6 +32,13 @@ def _tight_label(text: str):
     )
 
 
+def _section_heading(text: str):
+    st.markdown(
+        f"<div style='font-size:1.15rem;font-weight:700;margin:4px 0 6px 0'>{text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
     names = set()
     for i in range(n_slots):
@@ -45,24 +52,32 @@ def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
 
 def render_selected_player_header(p: dict, mode: str, slot_idx: int):
     ctx = p.get("context", {})
-    if p.get("headshot_url"):
-        _photo_col, _info_col = st.columns([0.8, 3.2])
-        with _photo_col:
-            st.image(p["headshot_url"], width=56)
-        with _info_col:
-            st.markdown(f"**{p['name']}**")
-            st.caption(f"{p['position']} · {p['team']}")
-    else:
-        st.markdown(f"**{p['name']}**")
-        st.caption(f"{p['position']} · {p['team']}")
-    if ctx.get("opponent"):
-        _side = "vs" if ctx.get("is_home") else "@"
-        st.caption(f"{_side} {ctx['opponent']}")
-    if mode == "Waiver":
-        st.caption(f"**{p.get('role', 'Roster')}**")
-    if st.button("Change", key=f"lc_change_{slot_idx}", use_container_width=True):
-        st.session_state.pop(f"lc_selected_{slot_idx}", None)
-        st.rerun()
+    _photo_col, _info_col = st.columns([0.7, 3.3])
+    with _photo_col:
+        if p.get("headshot_url"):
+            st.image(p["headshot_url"], width=44)
+    with _info_col:
+        st.markdown(
+            f"<div style='font-weight:700;font-size:1rem;line-height:1.2'>{p['name']}</div>"
+            f"<div style='opacity:0.65;font-size:0.85rem;line-height:1.3'>{p['position']} · {p['team']}</div>",
+            unsafe_allow_html=True,
+        )
+        if ctx.get("opponent"):
+            _side = "vs" if ctx.get("is_home") else "@"
+            st.markdown(
+                f"<div style='opacity:0.6;font-size:0.8rem;margin-top:1px'>{_side} {ctx['opponent']}</div>",
+                unsafe_allow_html=True,
+            )
+        if mode == "Waiver":
+            st.markdown(
+                f"<div style='opacity:0.75;font-size:0.8rem;font-weight:600;margin-top:1px'>{p.get('role', 'Roster')}</div>",
+                unsafe_allow_html=True,
+            )
+    _btn_col, _ = st.columns([1, 3])
+    with _btn_col:
+        if st.button("Change", key=f"lc_change_{slot_idx}", use_container_width=True):
+            st.session_state.pop(f"lc_selected_{slot_idx}", None)
+            st.rerun()
 
 
 def render_player_search(slot_idx: int, allowed_positions: list[str] | None, taken_names: set[str]):
@@ -141,8 +156,6 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
                 st.session_state[f"lc_selected_{slot_idx}"] = _p
                 st.rerun()
         else:
-            # No role to pick outside Waiver mode — the selection itself
-            # is the confirmation, no extra click needed.
             _p["role"] = "Roster"
             st.session_state[f"lc_selected_{slot_idx}"] = _p
             st.rerun()
@@ -152,13 +165,14 @@ def render_player_selector(slot_idx: int, mode: str, n_slots: int):
 def render(supabase, now_utc):
     st.markdown("## Lineup Comparison")
     st.markdown(
-        "<div style='opacity:0.7;font-size:0.95rem;margin:0 0 10px 0'>"
+        "<div style='opacity:0.7;font-size:0.95rem;margin:0 0 6px 0'>"
         "Compare fantasy projections, player props, game environment, and matchup context side by side."
         "</div>",
         unsafe_allow_html=True,
     )
 
-    _tc1, _tc2, _spacer = st.columns([1.6, 1.6, 2.8], gap="small")
+    # ── Mode + Scoring, tight, not full width ──────────
+    _tc1, _tc2, _spacer = st.columns([1.5, 1.5, 3], gap="small")
     with _tc1:
         _tight_label("Mode")
         _mode = st.segmented_control("Mode", ["Start/Sit", "FLEX", "Waiver"], default="Start/Sit",
@@ -168,18 +182,19 @@ def render(supabase, now_utc):
         _scoring = st.segmented_control("Scoring", ["PPR", "Half PPR", "Standard"], default="PPR",
                                          key="lc_scoring", label_visibility="collapsed") or "PPR"
 
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
 
+    # ── Player grid — VS only for exactly 2 players ────
     _n_slots = st.session_state.get("lc_n_slots", 2)
     _show_vs = _n_slots == 2
 
     if _show_vs:
-        _slot_cols = st.columns([5, 0.6, 5], gap="small")
+        _slot_cols = st.columns([5, 0.5, 5], gap="small")
         _player_cols = [_slot_cols[0], _slot_cols[2]]
         with _slot_cols[1]:
             st.markdown(
                 "<div style='display:flex;align-items:center;justify-content:center;height:100%;"
-                "opacity:0.4;font-size:0.85rem;font-weight:600;margin-top:40px'>VS</div>",
+                "opacity:0.4;font-size:0.8rem;font-weight:600;margin-top:34px'>VS</div>",
                 unsafe_allow_html=True,
             )
     else:
@@ -197,10 +212,11 @@ def render(supabase, now_utc):
             if _p:
                 _confirmed_players.append(_p)
 
-    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
-    _add_col, _ = st.columns([1.3, 4.7])
+    # ── Shared, compact Add Player — not full width ────
+    st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+    _add_col, _ = st.columns([1.1, 4.9])
     with _add_col:
-        if st.button("+ Add Player", disabled=_n_slots >= 4, key="lc_add", use_container_width=True):
+        if st.button("+ Add Player", disabled=_n_slots >= 4, key="lc_add"):
             st.session_state["lc_n_slots"] = min(4, _n_slots + 1)
             st.rerun()
 
@@ -211,7 +227,7 @@ def render(supabase, now_utc):
     with st.spinner("Loading market data..."):
         enriched = build_player_comparison(supabase, _confirmed_players, now_utc)
 
-    st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
     def _row(label, values, higher_is_better=True):
         _real = [v for v in values if v is not None and not (isinstance(v, float) and pd.isna(v))]
@@ -227,25 +243,34 @@ def render(supabase, now_utc):
 
     _names = [p["name"] for p in enriched]
 
+    # ── Player Props — hide entirely if fully empty, per spec ──
     _all_markets = sorted(set(m for p in enriched for m in p["props"].keys()))
-    if _all_markets:
-        st.markdown("### Player Props")
+    _has_any_prop_value = any(
+        p["props"].get(m) is not None for p in enriched for m in _all_markets
+    )
+    _section_heading("Player Props")
+    if not _all_markets or not _has_any_prop_value:
+        st.caption("Player props are not available yet. Check back closer to kickoff.")
+    else:
         _rows = [_row(PROP_LABELS.get(m, m), [p["props"].get(m) for p in enriched]) for m in _all_markets]
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
 
-    st.markdown("### Usage & Role")
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+
+    # ── Usage & Role ────────────────────────────────────
+    _section_heading("Usage & Role")
     positions = {p["position"] for p in enriched}
     metrics = POSITION_METRICS.get(next(iter(positions)), []) if len(positions) == 1 else ["targets_per_game"]
     usage_by_player = {p["name"]: get_player_usage(p["name"], p["team"], p["position"]) for p in enriched}
     if not any(usage_by_player.values()):
-        st.info("Usage data temporarily unavailable.")
+        st.caption("Usage data temporarily unavailable.")
     else:
         _rows = []
         for m in metrics:
             label = METRIC_LABELS.get(m, m)
             is_pct = m in PERCENT_METRICS
-            season_row = [label + " (Season)"]
-            role_row = [label + " (Current Role)"]
+            season_row = [label + " — Season"]
+            role_row = [label + " — Current Role"]
             for p in enriched:
                 u = usage_by_player.get(p["name"], {}).get(m, {})
                 sv, cv = u.get("season"), u.get("current_role")
@@ -259,9 +284,12 @@ def render(supabase, now_utc):
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
         st.caption("Usage data: nflverse")
 
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
+
+    # ── Game Environment ──────────────────────────────
     _has_env = any(p["context"] for p in enriched)
     if _has_env:
-        st.markdown("### Game Environment")
+        _section_heading("Game Environment")
         _env_metrics = [
             ("Opponent", [p["context"].get("opponent") for p in enriched], None),
             ("Spread", [p["context"].get("spread") for p in enriched], False),
@@ -272,8 +300,10 @@ def render(supabase, now_utc):
         for label, vals, higher in _env_metrics:
             _rows.append(_row(label, vals, higher_is_better=higher) if higher is not None else [label] + [str(_dash(v)) for v in vals])
         st.dataframe(pd.DataFrame(_rows, columns=["Metric"] + _names), use_container_width=True, hide_index=True)
+        st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
-    st.markdown("### Key Differences")
+    # ── Key Differences ───────────────────────────────
+    _section_heading("Key Differences")
     notes = generate_key_differences(enriched)
     for p in enriched:
         u = usage_by_player.get(p["name"], {})
