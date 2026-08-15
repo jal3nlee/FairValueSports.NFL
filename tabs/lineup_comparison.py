@@ -5,12 +5,12 @@ import streamlit as st
 import pandas as pd
 
 from core.nfl_player_search import render_nfl_player_search
-from core.lineup_data import build_player_comparison, PROP_LABELS
+from core.nfl_player_card import render_nfl_player_card
+from core.lineup_data import build_player_comparison, get_team_game_context, PROP_LABELS
 from core.nflverse_data import get_usage_samples, get_recent_games, LINEUP_USAGE_METRICS, METRIC_LABELS, PERCENT_METRICS
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 
 ROLES = ["Roster", "Bench", "Waiver"]
-HEADSHOT_SIZE = 72
 
 
 def _dash(v):
@@ -44,7 +44,7 @@ def _selected_names(exclude_idx: int, n_slots: int) -> set[str]:
     return names
 
 
-def render_player_slot(slot_idx: int, mode: str, n_slots: int):
+def render_player_slot(slot_idx: int, mode: str, n_slots: int, supabase, now_utc):
     _tight_label(f"Player {slot_idx + 1}")
     _taken = _selected_names(slot_idx, n_slots)
     _allowed = ["RB", "WR", "TE"] if mode == "FLEX" else ["QB", "RB", "WR", "TE"]
@@ -58,14 +58,9 @@ def render_player_slot(slot_idx: int, mode: str, n_slots: int):
     else:
         p["role"] = "Roster"
 
-    if p.get("headshot_url"):
-        st.markdown(
-            f"<img src='{p['headshot_url']}' style='width:{HEADSHOT_SIZE}px;height:{HEADSHOT_SIZE}px;"
-            f"object-fit:contain;margin-top:4px'/>",
-            unsafe_allow_html=True,
-        )
-    st.markdown(f"**{p['name']}**")
-    st.caption(f"{p['position']} · {p['team']}")
+    ctx = get_team_game_context(supabase, p["team"], now_utc)
+    p["context"] = ctx
+    render_nfl_player_card(p, ctx, compact=False)
 
     if slot_idx > 0 and n_slots > 1:
         if st.button("Remove", key=f"lc_remove_{slot_idx}", use_container_width=True):
@@ -172,7 +167,7 @@ def render(supabase, now_utc):
         with _slot_cols[1]:
             st.markdown(
                 "<div style='display:flex;align-items:center;justify-content:center;height:100%;"
-                "opacity:0.4;font-size:0.8rem;font-weight:600;margin-top:60px'>VS</div>",
+                "opacity:0.4;font-size:0.8rem;font-weight:600;margin-top:70px'>VS</div>",
                 unsafe_allow_html=True,
             )
     elif _n_slots == 1:
@@ -183,10 +178,8 @@ def render(supabase, now_utc):
     _confirmed_players = []
     for i, col in enumerate(_player_cols):
         with col:
-            p = render_player_slot(i, _mode, _n_slots)
-            _st_selected = st.session_state.get(f"lc_stored_{i}")
+            p = render_player_slot(i, _mode, _n_slots, supabase, now_utc)
             if p:
-                st.session_state[f"lc_stored_{i}"] = p
                 _confirmed_players.append(p)
 
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
