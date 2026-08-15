@@ -25,15 +25,37 @@ METRIC_LABELS = {
     "attempts_per_game":       "Pass Attempts / Game",
     "rush_attempts_per_game":  "Rush Attempts / Game",
     "passing_yards_per_game":  "Passing Yards / Game",
+    "receptions_per_game":     "Receptions / Game",
+    "rush_yards_per_game":     "Rushing Yards / Game",
 }
 PERCENT_METRICS = {"target_share", "carry_share"}
+
+# Lineup Analysis uses a wider, transparent-sample metric set (Season /
+# Last 5 / Last 3) rather than the Current Role recency-weighted number —
+# kept separate from POSITION_METRICS above since Prop Leaderboard's
+# Player Search view still uses that narrower set unchanged.
+LINEUP_USAGE_METRICS = {
+    "WR": ["targets_per_game", "target_share", "receptions_per_game", "receiving_yards_per_game"],
+    "TE": ["targets_per_game", "target_share", "receptions_per_game", "receiving_yards_per_game"],
+    "RB": ["carries_per_game", "carry_share", "targets_per_game", "receptions_per_game", "rush_yards_per_game"],
+    "QB": ["attempts_per_game", "passing_yards_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
+}
+_METRIC_FIELD = {
+    "targets_per_game": "targets",
+    "target_share": "target_share",
+    "receiving_yards_per_game": "receiving_yards",
+    "receptions_per_game": "receptions",
+    "carries_per_game": "carries",
+    "carry_share": "_carry_share",
+    "rush_yards_per_game": "rushing_yards",
+    "attempts_per_game": "attempts",
+    "passing_yards_per_game": "passing_yards",
+    "rush_attempts_per_game": "carries",
+}
 
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
 _BLEND_FLOOR_GAMES = 6
 
-# ── Single shared prop vocabulary — used by BOTH the Leaderboard and
-# Player Search subviews, so a stat resolves to the exact same nflverse
-# column no matter which workflow the user came in through. ──────────
 PROP_STAT_MAP = {
     "Passing Yards":     "passing_yards",
     "Passing TDs":       "passing_tds",
@@ -73,17 +95,8 @@ PROP_AVG_LABEL = {
 SAMPLE_OPTIONS = {"Last 3 Games": 3, "Last 5 Games": 5, "Last 10 Games": 10, "Season": None}
 _SEASON_MIN_GAMES = 3
 
-# Player Search only — Anytime TD has no reliable single nflverse column
-# (it's derived from three TD types combined), and isn't part of the
-# core shared vocabulary the Leaderboard uses, so it's kept separate
-# rather than forced into PROP_STAT_MAP.
 PLAYER_SEARCH_EXTRA_STATS = {"Anytime TD": "_any_td"}
 
-# Bridges PROP_STAT_MAP's labels to The Odds API's market keys — a
-# genuinely different vocabulary (a betting market, not a stat column),
-# used only for pulling CURRENT sportsbook lines in Player Search.
-# None = no sportsbook market exists for that stat (historical research
-# still works, there's just nothing to show under "Current Market").
 PROP_LABEL_TO_ODDS_MARKET = {
     "Passing Yards":    "player_pass_yds",
     "Passing TDs":      "player_pass_tds",
@@ -149,6 +162,7 @@ def get_current_season() -> int:
 
 
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
+    """Kept for internal/backtesting use only — not shown to end users on Lineup Analysis."""
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if not pairs:
         return None
@@ -163,6 +177,7 @@ def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
 
 
 def blend_prior_season(current_value, prior_value, games_played: int, continuity: bool = True):
+    """Kept for internal/backtesting use only — not shown to end users on Lineup Analysis."""
     if current_value is None and prior_value is None:
         return None
     if not continuity or prior_value is None or games_played >= _BLEND_FLOOR_GAMES:
@@ -174,6 +189,8 @@ def blend_prior_season(current_value, prior_value, games_played: int, continuity
 
 
 def _build_weekly_rows(player_stats, team_stats, player_name: str, team_abbr: str):
+    """Returns this player's games, sorted OLDEST -> NEWEST — the ordering
+    every window slice (season/last5/last3) below relies on."""
     if player_stats is None:
         return []
     try:
@@ -211,6 +228,9 @@ def _team_abbr_for(team_full_name: str, teams_df) -> str | None:
 
 
 def get_player_usage(player_name: str, team_full_name: str, position: str, prior_team_full_name: str | None = None) -> dict:
+    """Current-Role (recency-weighted, prior-season-blended) calculation —
+    still used by Prop Leaderboard's Player Search view. NOT used by
+    Lineup Analysis, which shows transparent Season/Last5/Last3 instead."""
     if not _NFLVERSE_AVAILABLE:
         return {}
     try:
@@ -274,13 +294,87 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
         return {}
 
 
+def get_usage_samples(player_name: str, team_full_name: str, position: str) -> dict:
+    """
+    Lineup Analysis's Usage & Role source — transparent Season / Last 5 /
+    Last 3 windows, CURRENT SEASON ONLY, no prior-season blending, no
+    recency weighting. Each window reports both the averaged value AND
+    how many actual games went into it, so a 3-game "Last 5" is never
+    presented as if it were a real 5-game sample.
+    """
+    if not _NFLVERSE_AVAILABLE:
+        return {}
+    try:
+        season = get_current_season()
+        if season is None:
+            return {}
+        teams_df = _load_teams()
+        team_abbr = _team_abbr_for(team_full_name, teams_df)
+        if not team_abbr:
+            return {}
+        rows = _build_weekly_rows(_load_player_stats(season), _load_team_stats(season), player_name, team_abbr)
+        if not rows:
+            return {}
+
+        windows = {"season": rows, "last5": rows[-5:], "last3": rows[-3:]}
+        metrics = LINEUP_USAGE_METRICS.get(position, [])
+
+        result = {"games_played": len(rows)}
+        for m in metrics:
+            field = _METRIC_FIELD.get(m)
+            entry = {}
+            for wname, wrows in windows.items():
+                vals = [r.get(field) for r in wrows if r.get(field) is not None]
+                entry[wname] = {"value": round(sum(vals) / len(vals), 2) if vals else None, "games": len(vals)}
+            result[m] = entry
+        return result
+    except Exception:
+        return {}
+
+
+def get_recent_games(player_name: str, team_full_name: str, position: str, n: int = 5) -> list[dict]:
+    """Position-specific game-level rows, most recent first — current season only."""
+    if not _NFLVERSE_AVAILABLE:
+        return []
+    try:
+        season = get_current_season()
+        if season is None:
+            return []
+        teams_df = _load_teams()
+        team_abbr = _team_abbr_for(team_full_name, teams_df)
+        if not team_abbr:
+            return []
+        rows = _build_weekly_rows(_load_player_stats(season), _load_team_stats(season), player_name, team_abbr)
+        if not rows:
+            return []
+        rows_sorted = sorted(rows, key=lambda r: r.get("week") or 0, reverse=True)[:n]
+
+        out = []
+        for r in rows_sorted:
+            row = {"Week": r.get("week"), "Opponent": r.get("opponent_team", "—")}
+            if position in ("WR", "TE"):
+                row.update({
+                    "Targets": r.get("targets"), "Receptions": r.get("receptions"),
+                    "Receiving Yards": r.get("receiving_yards"),
+                })
+            elif position == "RB":
+                row.update({
+                    "Carries": r.get("carries"), "Rush Yards": r.get("rushing_yards"),
+                    "Targets": r.get("targets"), "Receptions": r.get("receptions"),
+                })
+            elif position == "QB":
+                row.update({
+                    "Pass Att": r.get("attempts"), "Pass Yds": r.get("passing_yards"),
+                    "Pass TD": r.get("passing_tds"), "Rush Att": r.get("carries"),
+                    "Rush Yds": r.get("rushing_yards"),
+                })
+            out.append(row)
+        return out
+    except Exception:
+        return []
+
+
 def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, n_games: int | None = 10) -> list[dict]:
-    """
-    stat_field is an nflverse column name (from PROP_STAT_MAP's values, or
-    "_any_td" for the Player-Search-only Anytime TD derivation) — the SAME
-    field vocabulary the Leaderboard uses, so both subviews read identical
-    underlying numbers. Pass n_games=None for the full season.
-    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
@@ -315,12 +409,6 @@ def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, 
 
 
 def calculate_hit_rate(game_log: list[dict], line: float, side: str = "Over") -> dict | None:
-    """
-    THE single shared hit-rate engine — Leaderboard and Player Search both
-    call this, never a separate inline calculation. Pushes (exact line
-    matches) are excluded from both the hit count AND the denominator.
-    Returns None if there's no game log at all, or every game was a push.
-    """
     if not game_log:
         return None
     hits = misses = pushes = 0
@@ -337,10 +425,8 @@ def calculate_hit_rate(game_log: list[dict], line: float, side: str = "Over") ->
     return {"hits": hits, "total": decided, "pushes": pushes}
 
 
-# ── Prop Leaderboard ────────────────────────────────────────────
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def _all_player_weekly_rows(season: int) -> list[dict]:
-    """One bulk pull, cached — every player's every game this season, in one list."""
     stats = _load_player_stats(season)
     if stats is None:
         return []
@@ -351,12 +437,6 @@ def _all_player_weekly_rows(season: int) -> list[dict]:
 
 
 def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label: str) -> list[dict]:
-    """
-    Scans nflverse's full current-season player-week table directly — no
-    per-team loop needed. Uses the SAME calculate_hit_rate engine Player
-    Search uses, per-player, so results are guaranteed consistent between
-    the two subviews for identical inputs.
-    """
     season = get_current_season()
     if season is None:
         return []
@@ -400,12 +480,8 @@ def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label
             continue
 
         results.append({
-            "player": name,
-            "team": team,
-            "position": positions_by_player.get((name, team), ""),
-            "hits": hr["hits"],
-            "games": hr["total"],
-            "pushes": hr["pushes"],
+            "player": name, "team": team, "position": positions_by_player.get((name, team), ""),
+            "hits": hr["hits"], "games": hr["total"], "pushes": hr["pushes"],
             "hit_rate": hr["hits"] / hr["total"] * 100,
             "avg": round(sum(g["value"] for g in sample) / len(sample), 1),
         })
