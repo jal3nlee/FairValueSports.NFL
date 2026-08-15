@@ -53,19 +53,14 @@ NFL_TEAMS = {
 POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"]
 FLEX_POSITIONS = ["RB", "WR", "TE"]
 
-DEBUG_PHOTOS = True  # temporary — confirms headshot field shape, remove once known
-
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def espn_search_players(query: str) -> list[dict]:
     """
     Search NFL players via ESPN's public site API. Free, unofficial, no key.
-
-    Confirmed live shape: payload['items'] is a FLAT list of player objects.
-    Team info lives at item['teamRelationships'][0]['core'] (abbreviation,
-    displayName). Position is NOT returned — backfilled via roster lookup.
-    A 'headshot' key is confirmed present on each item; its inner shape
-    (dict with 'href', or a bare URL) isn't confirmed yet — debugged below.
+    Team info: item['teamRelationships'][0]['core'] (abbreviation, displayName).
+    Position not returned here — backfilled via roster lookup.
+    Headshot confirmed shape: {'href': <url>, 'alt': <name>}.
     """
     if not query or len(query.strip()) < 2:
         return []
@@ -83,27 +78,19 @@ def espn_search_players(query: str) -> list[dict]:
         for item in payload.get("items", []):
             if item.get("type") != "player":
                 continue
-            if DEBUG_PHOTOS and not results:
-                st.caption(f"debug: headshot raw value = {item.get('headshot')!r}")
-
             team_rel = (item.get("teamRelationships") or [{}])[0]
             core = team_rel.get("core", {})
             team_abbr = core.get("abbreviation", "")
             team_name = core.get("displayName", "")
-
             headshot_raw = item.get("headshot")
-            headshot_url = (
-                headshot_raw.get("href") if isinstance(headshot_raw, dict)
-                else headshot_raw if isinstance(headshot_raw, str)
-                else None
-            )
+            headshot_url = headshot_raw.get("href") if isinstance(headshot_raw, dict) else None
 
             results.append({
                 "id": item.get("id"),
                 "name": item.get("displayName", ""),
                 "team": team_name,
                 "team_abbr": team_abbr,
-                "position": "",  # backfilled below
+                "position": "",
                 "headshot_url": headshot_url,
             })
 
@@ -133,19 +120,10 @@ def get_players_by_team(team_abbr: str) -> list[dict]:
         if r.status_code != 200:
             return []
         out = []
-        _debug_shown = False
         for group in r.json().get("athletes", []):
             for p in group.get("items", []):
-                if DEBUG_PHOTOS and not _debug_shown:
-                    st.caption(f"debug: roster player keys = {list(p.keys())}")
-                    st.caption(f"debug: roster headshot raw value = {p.get('headshot')!r}")
-                    _debug_shown = True
                 headshot_raw = p.get("headshot")
-                headshot_url = (
-                    headshot_raw.get("href") if isinstance(headshot_raw, dict)
-                    else headshot_raw if isinstance(headshot_raw, str)
-                    else None
-                )
+                headshot_url = headshot_raw.get("href") if isinstance(headshot_raw, dict) else None
                 out.append({
                     "id": p.get("id"),
                     "name": p.get("fullName", ""),
