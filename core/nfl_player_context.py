@@ -9,8 +9,6 @@ import pandas as pd
 
 from core.nfl_defense_data import get_opponent_defense, POSITION_DEFENSE_METRICS
 
-DEBUG_CONTEXT = True  # temporary — confirms real current-season resolution, remove once confirmed
-
 
 def format_nfl_week(week, season, current_season, compact: bool = False) -> str:
     """
@@ -25,13 +23,12 @@ def format_nfl_week(week, season, current_season, compact: bool = False) -> str:
 
 def render_opponent_defense_single(opponent: str | None, position: str, scoring: str = "PPR"):
     """
-    One player's opponent-defense table. Never takes a player name —
-    the header is built entirely from the opponent + position, so a
-    player-identity header can't accidentally leak back in here.
+    One player's opponent-defense table — general season-long defensive
+    stats for the opponent, aggregated across ALL offensive players they've
+    faced league-wide. Not the selected player's personal history against
+    that team. Never takes a player name — the header is built entirely
+    from the opponent + position.
     """
-    if DEBUG_CONTEXT:
-        st.caption(f"debug: render_opponent_defense_single(opponent={opponent!r}, position={position!r})")
-
     if not opponent:
         st.caption("No opponent this week (bye week).")
         return
@@ -51,12 +48,9 @@ def render_opponent_defense_single(opponent: str | None, position: str, scoring:
 def render_opponent_defense_multi(players_with_opponents: list[dict], scoring: str = "PPR"):
     """
     players_with_opponents: [{"name", "position", "opponent"}, ...] — used
-    for Lineup Analysis's multi-player comparison. Headers describe each
-    defense (never a player name), matched to each player's position.
+    for Lineup Analysis's multi-player comparison. Same general opponent
+    defensive stats as above, matched to each selected player's position.
     """
-    if DEBUG_CONTEXT:
-        st.caption(f"debug: render_opponent_defense_multi called with {len(players_with_opponents)} players")
-
     if all(not p.get("opponent") for p in players_with_opponents):
         st.caption("No opponent this week (bye week).")
         return
