@@ -58,11 +58,6 @@ CARD_METRIC_LABELS = {
     "total_tds_per_game":       "TD/G",
 }
 
-# Player Context's expanded Season Stats subsection — a slightly wider
-# metric set than the card/Usage&Role tables, purely additive detail.
-# Derived ratios (Comp %, YPC, Yds/Rec) are computed at display time from
-# these same per-game season averages — mathematically equivalent to the
-# true season totals ratio, since the games-count cancels out.
 EXPANDED_SEASON_METRICS = {
     "QB": ["attempts_per_game", "completions_per_game", "passing_yards_per_game",
            "passing_tds_per_game", "interceptions_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
@@ -150,6 +145,8 @@ PROP_LABEL_TO_ODDS_MARKET = {
     "Anytime TD":       "player_anytime_td",
 }
 
+DEBUG_SEASON = True  # temporary — confirms real get_current_season() value
+
 
 def _norm_name(name: str) -> str:
     if not name:
@@ -195,15 +192,20 @@ def get_current_season() -> int:
     if not _NFLVERSE_AVAILABLE:
         return None
     try:
-        return nfl.get_current_season()
+        season = nfl.get_current_season()
+        if DEBUG_SEASON:
+            st.caption(f"debug: nflreadpy.get_current_season() = {season!r}")
+        return season
     except Exception:
         return None
 
 
 def _week_label(week, season, current_season):
-    if season is not None and current_season is not None and season != current_season:
-        return f"W{week} {season}"
-    return f"W{week}"
+    """Delegates to the single shared formatter in core.nfl_player_context
+    so there is exactly one week-label implementation, not a second one
+    living inside this module."""
+    from core.nfl_player_context import format_nfl_week
+    return format_nfl_week(week, season, current_season)
 
 
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
@@ -386,13 +388,6 @@ def get_card_season_stats(player_name: str, team_full_name: str, position: str) 
 
 
 def get_expanded_season_stats(player_name: str, team_full_name: str, position: str) -> dict:
-    """
-    Player Context's Season Stats subsection — a wider metric set than
-    the card, reusing get_usage_samples's same engine. Derived ratios
-    (Comp %, YPC, Yds/Rec) are computed here from per-game season
-    averages, mathematically equal to the true season-total ratio.
-    Returns {} if no current-season data exists.
-    """
     metric_list = EXPANDED_SEASON_METRICS.get(position, [])
     if not metric_list:
         return {}
@@ -426,12 +421,6 @@ def get_expanded_season_stats(player_name: str, team_full_name: str, position: s
 
 
 def get_recent_games(player_name: str, team_full_name: str, position: str, n: int = 5) -> list[dict]:
-    """
-    Returns rows with a season-aware "Week" label ('W8' current season,
-    'W17 2025' prior season). This function only fetches the current
-    season internally — no cross-season fetch exists yet — so labels
-    currently always render plain 'W#'; ready if that ever changes.
-    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
