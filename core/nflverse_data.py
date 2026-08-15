@@ -31,9 +31,6 @@ PERCENT_METRICS = {"target_share", "carry_share"}
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
 _BLEND_FLOOR_GAMES = 6
 
-# Maps Odds API market keys (from core/lineup_data.py) to nflverse's
-# per-game field names, so a prop line can be checked against real
-# historical results without a second, separate stat vocabulary.
 MARKET_TO_STAT_FIELD = {
     "player_pass_yds": "passing_yards",
     "player_pass_tds": "passing_tds",
@@ -44,8 +41,48 @@ MARKET_TO_STAT_FIELD = {
     "player_rush_attempts": "carries",
     "player_reception_yds": "receiving_yards",
     "player_receptions": "receptions",
-    "player_anytime_td": "_any_td",  # derived, not a raw column
+    "player_anytime_td": "_any_td",
 }
+
+# ── Prop Leaderboard: stat -> nflverse column, and stat -> eligible positions ──
+PROP_STAT_MAP = {
+    "Passing Yards":     "passing_yards",
+    "Passing TDs":       "passing_tds",
+    "Interceptions":     "passing_interceptions",
+    "Pass Attempts":     "attempts",
+    "Completions":       "completions",
+    "Rushing Yards":     "rushing_yards",
+    "Rushing Attempts":  "carries",
+    "Receiving Yards":   "receiving_yards",
+    "Receptions":        "receptions",
+    "Targets":           "targets",
+}
+PROP_POSITION_MAP = {
+    "Passing Yards":    ["QB"],
+    "Passing TDs":      ["QB"],
+    "Interceptions":    ["QB"],
+    "Pass Attempts":    ["QB"],
+    "Completions":      ["QB"],
+    "Rushing Yards":    ["RB", "QB", "WR"],
+    "Rushing Attempts": ["RB", "QB", "WR"],
+    "Receiving Yards":  ["WR", "TE", "RB"],
+    "Receptions":       ["WR", "TE", "RB"],
+    "Targets":          ["WR", "TE", "RB"],
+}
+PROP_AVG_LABEL = {
+    "Passing Yards":    "Avg Pass Yds",
+    "Passing TDs":      "Avg Pass TDs",
+    "Interceptions":    "Avg INT",
+    "Pass Attempts":    "Avg Pass Att",
+    "Completions":      "Avg Completions",
+    "Rushing Yards":    "Avg Rush Yds",
+    "Rushing Attempts": "Avg Rush Att",
+    "Receiving Yards":  "Avg Rec Yds",
+    "Receptions":       "Avg Receptions",
+    "Targets":          "Avg Targets",
+}
+SAMPLE_OPTIONS = {"Last 3 Games": 3, "Last 5 Games": 5, "Last 10 Games": 10, "Season": None}
+_SEASON_MIN_GAMES = 3
 
 
 def _norm_name(name: str) -> str:
@@ -98,7 +135,6 @@ def get_current_season() -> int:
 
 
 def recency_weighted_average(values: list, decay: float = RECENCY_DECAY):
-    """values: chronological order, OLDEST first, most recent LAST."""
     pairs = [(i, v) for i, v in enumerate(values) if v is not None]
     if not pairs:
         return None
@@ -161,7 +197,6 @@ def _team_abbr_for(team_full_name: str, teams_df) -> str | None:
 
 
 def get_player_usage(player_name: str, team_full_name: str, position: str, prior_team_full_name: str | None = None) -> dict:
-    """Returns {} on any failure — callers must keep working even if nflverse is unreachable."""
     if not _NFLVERSE_AVAILABLE:
         return {}
     try:
@@ -226,11 +261,6 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
 
 
 def get_player_game_log(player_name: str, team_full_name: str, market_key: str, n_games: int = 10) -> list[dict]:
-    """
-    Returns up to n_games most-recent CURRENT-SEASON games as
-    [{"week": int, "opponent": str, "value": float}], most recent first.
-    Pass n_games=None for the full season. Empty list on any failure.
-    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
@@ -266,11 +296,89 @@ def get_player_game_log(player_name: str, team_full_name: str, market_key: str, 
 
 
 def calculate_hit_rate(game_log: list[dict], line: float, side: str = "Over") -> dict | None:
-    """side: 'Over' or 'Under'. Returns None if there's no game log to check."""
     if not game_log:
         return None
-    hits = sum(
-        1 for g in game_log
-        if (g["value"] > line if side == "Over" else g["value"] < line)
-    )
+    hits = sum(1 for g in game_log if (g["value"] > line if side == "Over" else g["value"] < line))
     return {"hits": hits, "total": len(game_log)}
+
+
+# ── Prop Leaderboard ────────────────────────────────────────────
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _all_player_weekly_rows(season: int) -> list[dict]:
+    """One bulk pull, cached — every player's every game this season, in one list."""
+    stats = _load_player_stats(season)
+    if stats is None:
+        return []
+    try:
+        return stats.to_dicts()
+    except Exception:
+        return []
+
+
+def build_prop_leaderboard(stat_label: str, side: str, line: float, sample_label: str) -> list[dict]:
+    """
+    Scans nflverse's full current-season player-week table directly — no
+    per-team loop needed, nflverse already returns every player at once.
+    Returns up to 10 rows: {player, team, position, hits, games, hit_rate, avg, pushes}.
+    """
+    season = get_current_season()
+    if season is None:
+        return []
+    field = PROP_STAT_MAP.get(stat_label)
+    eligible_positions = PROP_POSITION_MAP.get(stat_label, [])
+    n_games = SAMPLE_OPTIONS.get(sample_label)
+    if not field or not eligible_positions:
+        return []
+
+    rows = _all_player_weekly_rows(season)
+    if not rows:
+        return []
+
+    by_player: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if r.get("position") not in eligible_positions:
+            continue
+        val = r.get(field)
+        if val is None:
+            continue
+        key = (r.get("player_display_name") or r.get("player_name"), r.get("team"))
+        by_player.setdefault(key, []).append({"week": r.get("week"), "value": float(val)})
+
+    results = []
+    for (name, team), games in by_player.items():
+        games.sort(key=lambda g: g["week"] or 0, reverse=True)
+
+        if n_games is not None:
+            if len(games) < n_games:
+                continue
+            sample = games[:n_games]
+        else:
+            if len(games) < _SEASON_MIN_GAMES:
+                continue
+            sample = games
+
+        hits, misses, pushes = 0, 0, 0
+        for g in sample:
+            if g["value"] == line:
+                pushes += 1
+            elif (g["value"] > line if side == "Over" else g["value"] < line):
+                hits += 1
+            else:
+                misses += 1
+        decided = hits + misses
+        if decided == 0:
+            continue
+
+        results.append({
+            "player": name,
+            "team": team,
+            "position": next((r.get("position") for r in rows if (r.get("player_display_name") or r.get("player_name")) == name and r.get("team") == team), ""),
+            "hits": hits,
+            "games": decided,
+            "pushes": pushes,
+            "hit_rate": hits / decided * 100,
+            "avg": round(sum(g["value"] for g in sample) / len(sample), 1),
+        })
+
+    results.sort(key=lambda r: (r["hit_rate"], r["hits"], r["games"]), reverse=True)
+    return results[:10]
