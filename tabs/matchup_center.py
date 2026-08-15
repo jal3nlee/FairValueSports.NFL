@@ -5,6 +5,7 @@ import streamlit as st
 from core.odds_math import parse_iso_dt_utc, EASTERN
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
+from core.nfl_live_scores import fetch_nfl_scoreboard, get_game_status, format_live_line
 
 TIPS = {
     "ev":        "Expected Value — your edge vs. the fair price. Positive = favorable bet.",
@@ -98,6 +99,10 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
         st.info(f"No games available for {caption_label}.")
         return
 
+    # ── One shared scoreboard fetch for this whole render — reused per
+    # game below, not re-fetched per card. ────────────────────────────
+    _scoreboard_events = fetch_nfl_scoreboard()
+
     _games_ordered = (
         _df_mc.assign(_sort_dt=_df_mc["commence_time"].apply(parse_iso_dt_utc))
         .dropna(subset=["_sort_dt"])
@@ -129,6 +134,12 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
         _teams = _game_label.split(" vs ")
         _ht = _teams[0] if len(_teams) == 2 else _game_label
         _at = _teams[1] if len(_teams) == 2 else ""
+
+        # ── Live/Final status — pregame falls back to kickoff time ──
+        _ht_abbr = NFL_TEAM_ABBR.get(_ht, "").upper()
+        _at_abbr = NFL_TEAM_ABBR.get(_at, "").upper()
+        _game_status = get_game_status(_scoreboard_events, _ht_abbr, _at_abbr)
+        _live_line = format_live_line(_game_status)
 
         _favorite_str = _underdog_str = "—"
         _ml_rows = _game_rows[_game_rows["Market"] == "Moneyline"].copy()
@@ -171,7 +182,17 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
                 else:
                     st.markdown(f"**{_at} @ {_ht}**")
             with _cc2:
-                st.caption(_et.strftime("%a %I:%M %p ET").lstrip("0").replace(" 0", " "))
+                if _live_line and _game_status.get("state") == "in":
+                    st.markdown(
+                        f"<span style='color:#e74c3c;font-weight:600;font-size:0.8rem'>LIVE</span>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(_et.strftime("%a %I:%M %p ET").lstrip("0").replace(" 0", " "))
+
+            if _live_line:
+                st.caption(_live_line)
+
             st.caption(f"ML: {_favorite_str} / {_underdog_str}   ·   {_total_str}   ·   Spread: {_sp_str}")
 
             with st.expander("View full matchup research", expanded=False):
