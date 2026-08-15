@@ -1,16 +1,10 @@
 # core/nfl_player_card.py
-# Shared NFL player identity card. Two variants:
-#   compact=True  — Prop Leaderboard's Player Search: tight, width-
-#                   constrained identity-only card. Unchanged.
-#   compact=False — Lineup Analysis: MLB-style two-region profile card —
-#                   left identity group, right "Season Stats" panel.
-#                   No betting-market data (spread, game total, team
-#                   total); that lives in Game Environment.
 import streamlit as st
+import pandas as pd
 
 from core.odds_math import parse_iso_dt_utc, EASTERN
 from core.lineup_data import NFL_TEAMS
-from core.nflverse_data import get_card_season_stats
+from core.nflverse_data import get_card_season_stats, get_current_season
 
 _ABBR = {full: abbr.upper() for full, abbr in NFL_TEAMS.items()}
 
@@ -33,15 +27,15 @@ def render_nfl_player_card(
     player: dict,
     context: dict | None = None,
     compact: bool = False,
-    spread: float | None = None,      # accepted for call-site compatibility, no longer rendered
-    game_total: float | None = None,  # accepted for call-site compatibility, no longer rendered
-    team_total: float | None = None,  # accepted for call-site compatibility, no longer rendered
+    spread: float | None = None,
+    game_total: float | None = None,
+    team_total: float | None = None,
 ):
     """
-    player: {"name", "team", "position", "headshot_url"} — team is the
-    full display name, abbreviated here for display.
-    context: dict from core.lineup_data.get_team_game_context(), or
-    None/{} for a bye week / context not yet available.
+    compact=True: Prop Leaderboard's Player Search — tight identity card.
+    compact=False: Lineup Analysis — MLB-style two-region card, season
+    stats rendered as a real single-row table via st.dataframe (matches
+    the MLB card's ERA | WHIP | K | Wins layout).
     """
     context = context or {}
     team_abbr = _team_abbr(player.get("team", ""))
@@ -54,10 +48,9 @@ def render_nfl_player_card(
         opp_abbr = _team_abbr(opponent)
         game_time = _fmt_game_time(context.get("commence_time"))
         opp_line = f"{side} {opp_abbr}" + (f" · {game_time}" if game_time else "")
-    elif "opponent" in context:  # context was fetched but genuinely empty -> bye week
+    elif "opponent" in context:
         opp_line = "Bye Week"
 
-    # ── Compact variant — Prop Leaderboard's Player Search — unchanged ──
     if compact:
         headshot_size = 72
         img_html = (
@@ -84,8 +77,8 @@ def render_nfl_player_card(
         )
         return
 
-    # ── Full variant — Lineup Analysis — MLB-style two-region card ──
     season_stats = get_card_season_stats(player["name"], player.get("team", ""), player.get("position", ""))
+    season_year = get_current_season() or "—"
     headshot_size = 88
 
     with st.container(border=True):
@@ -123,15 +116,9 @@ def render_nfl_player_card(
         with _right_col:
             if season_stats:
                 st.markdown(
-                    "<div style='opacity:0.6;font-size:0.78rem;font-weight:600;letter-spacing:0.03em;"
-                    "text-transform:uppercase;margin-bottom:4px'>2026 Season Stats</div>",
+                    f"<div style='opacity:0.6;font-size:0.78rem;font-weight:600;letter-spacing:0.03em;"
+                    f"text-transform:uppercase;margin-bottom:4px'>{season_year} Season Stats</div>",
                     unsafe_allow_html=True,
                 )
-                _rows_html = "".join(
-                    f"<div style='display:flex;justify-content:space-between;padding:2px 0;"
-                    f"font-size:0.88rem;border-bottom:1px solid rgba(128,128,128,0.12)'>"
-                    f"<span style='opacity:0.75'>{s['label']}</span>"
-                    f"<span style='font-weight:600'>{s['value']:g}</span></div>"
-                    for s in season_stats
-                )
-                st.markdown(f"<div>{_rows_html}</div>", unsafe_allow_html=True)
+                _df = pd.DataFrame([{s["label"]: s["value"] for s in season_stats}])
+                st.dataframe(_df, use_container_width=True, hide_index=True)
