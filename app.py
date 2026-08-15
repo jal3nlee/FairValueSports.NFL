@@ -14,7 +14,7 @@ from tabs import (
     matchup_center,
     lineup_comparison,
     fantasy_draft,
-    player_props,
+    prop_leaderboard,
     sportsbook_screener,
     parlay_builder,
 )
@@ -227,7 +227,7 @@ with st.sidebar.expander("How to use", expanded=False):
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
 4. **Lineup Comparison** — compare fantasy players side by side using real game odds and market props.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
-6. **Player Props** — research sportsbook player props against historical performance and usage.
+6. **Prop Leaderboard** — see which players have hit a prop threshold most often over recent games.
 7. **Sportsbook Screener** — pure line shopping across every sportsbook.
 8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
         """
@@ -290,8 +290,6 @@ with st.sidebar.expander("Disclaimer", expanded=False):
 def run_app():
     now_utc = datetime.now(timezone.utc)
 
-    # Bankroll/Kelly UI removed from the sidebar — fixed defaults under the
-    # hood since several tabs still require these as arguments.
     eff_bankroll = 1000.0
     eff_kelly = 0.5
 
@@ -301,7 +299,7 @@ def run_app():
         "Matchup Center",
         "Lineup Comparison",
         "Fantasy Draft",
-        "Player Props",
+        "Prop Leaderboard",
         "Sportsbook Screener",
         "Parlay Builder",
     ])
@@ -322,7 +320,7 @@ def run_app():
         fantasy_draft.render()
 
     with tabs[5]:
-        player_props.render(supabase, now_utc)
+        prop_leaderboard.render(supabase, now_utc)
 
     with tabs[6]:
         sportsbook_screener.render(supabase, now_utc)
