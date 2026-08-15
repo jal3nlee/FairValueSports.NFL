@@ -38,9 +38,6 @@ LINEUP_USAGE_METRICS = {
     "QB": ["attempts_per_game", "passing_yards_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
 }
 
-# The player card's season-stat panel — 4 position-specific stats,
-# reusing get_usage_samples's exact calculation engine, just a
-# different metric list than LINEUP_USAGE_METRICS above (unchanged).
 CARD_SEASON_METRICS = {
     "QB": ["passing_yards_per_game", "passing_tds_per_game", "rush_yards_per_game", "interceptions_per_game"],
     "RB": ["carries_per_game", "rush_yards_per_game", "targets_per_game", "total_tds_per_game"],
@@ -74,7 +71,7 @@ _METRIC_FIELD = {
     "passing_tds_per_game": "passing_tds",
     "interceptions_per_game": "passing_interceptions",
     "receiving_tds_per_game": "receiving_tds",
-    "total_tds_per_game": "_total_td",  # derived: rushing_tds + receiving_tds
+    "total_tds_per_game": "_total_td",
 }
 
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
@@ -230,7 +227,6 @@ def _build_weekly_rows(player_stats, team_stats, player_name: str, team_abbr: st
                 round(r["carries"] / _team_carries, 3)
                 if r.get("carries") is not None and _team_carries else None
             )
-            # Combined rushing+receiving TDs — used by RB card total_tds_per_game.
             _rush_td = r.get("rushing_tds")
             _rec_td = r.get("receiving_tds")
             if _rush_td is not None or _rec_td is not None:
@@ -319,16 +315,6 @@ def get_player_usage(player_name: str, team_full_name: str, position: str, prior
 
 
 def get_usage_samples(player_name: str, team_full_name: str, position: str, metrics: list[str] | None = None) -> dict:
-    """
-    Transparent Season / Last 5 / Last 3 windows — CURRENT SEASON ONLY,
-    no prior-season blending, no recency weighting. Each window reports
-    both the averaged value AND how many actual games went into it.
-
-    metrics: optional override list of metric keys to compute — defaults
-    to LINEUP_USAGE_METRICS[position] (the Usage & Role table's set,
-    unchanged behavior). The player card passes CARD_SEASON_METRICS
-    instead, reusing this exact same calculation, not a separate one.
-    """
     if not _NFLVERSE_AVAILABLE:
         return {}
     try:
@@ -360,13 +346,6 @@ def get_usage_samples(player_name: str, team_full_name: str, position: str, metr
 
 
 def get_card_season_stats(player_name: str, team_full_name: str, position: str) -> list[dict]:
-    """
-    The player card's 4-stat season snapshot — reuses get_usage_samples's
-    exact same season-averaging code, just a position-specific metric
-    list (CARD_SEASON_METRICS). Returns [] if the player has no
-    current-season games at all (card should omit the stat panel
-    entirely, never show fake 0.0s).
-    """
     metric_list = CARD_SEASON_METRICS.get(position, [])
     if not metric_list:
         return []
@@ -424,6 +403,13 @@ def get_recent_games(player_name: str, team_full_name: str, position: str, n: in
 
 
 def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, n_games: int | None = 10) -> list[dict]:
+    """
+    Returns [{"week","opponent","value","season"}], most recent first.
+    "season" is tagged on each entry (current season only — this
+    function has no prior-season blending) so downstream display code
+    can label cross-season games correctly if the sample logic ever
+    changes; today every entry's season is always the current one.
+    """
     if not _NFLVERSE_AVAILABLE:
         return []
     try:
@@ -450,8 +436,11 @@ def get_player_game_log(player_name: str, team_full_name: str, stat_field: str, 
                 val = r.get(stat_field)
             if val is None:
                 continue
-            out.append({"week": r.get("week"), "opponent": r.get("opponent_team", "—"), "value": float(val)})
-        out.sort(key=lambda x: x["week"] or 0, reverse=True)
+            out.append({
+                "week": r.get("week"), "opponent": r.get("opponent_team", "—"),
+                "value": float(val), "season": r.get("season", season),
+            })
+        out.sort(key=lambda x: (x["season"] or 0, x["week"] or 0), reverse=True)
         return out[:n_games] if n_games else out
     except Exception:
         return []
