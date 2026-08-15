@@ -225,7 +225,7 @@ with st.sidebar.expander("How to use", expanded=False):
 2. **Fair Value Model** — pick a Date Range and Market, filter by Expected Value
    and Odds, and compare Best Odds against our Fair Odds estimate.
 3. **Matchup Center** — dig into any individual game's market snapshot and research.
-4. **Lineup Comparison** — compare fantasy players side by side using real game odds and market props.
+4. **Lineup Analysis** — research weekly usage, props, game environment, and matchup context for one player, or compare up to four.
 5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
 6. **Prop Leaderboard** — find top hit-rate performers by prop threshold, or research one player's props directly.
 7. **Sportsbook Screener** — pure line shopping across every sportsbook.
@@ -297,7 +297,7 @@ def run_app():
         "Market Movers",
         "Fair Value Model",
         "Matchup Center",
-        "Lineup Comparison",
+        "Lineup Analysis",
         "Fantasy Draft",
         "Prop Leaderboard",
         "Sportsbook Screener",
