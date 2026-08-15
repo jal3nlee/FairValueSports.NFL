@@ -38,24 +38,26 @@ LINEUP_USAGE_METRICS = {
     "QB": ["attempts_per_game", "passing_yards_per_game", "rush_attempts_per_game", "rush_yards_per_game"],
 }
 
-# The player card's season-stat row — a smaller, position-specific set,
-# separate from LINEUP_USAGE_METRICS above (which stays exactly as-is,
-# unchanged, for the Usage & Role table). Same underlying calculation
-# engine (get_usage_samples), just a different metric list passed in.
+# The player card's season-stat panel — 4 position-specific stats,
+# reusing get_usage_samples's exact calculation engine, just a
+# different metric list than LINEUP_USAGE_METRICS above (unchanged).
 CARD_SEASON_METRICS = {
-    "QB": ["passing_yards_per_game", "passing_tds_per_game", "rush_yards_per_game"],
-    "RB": ["carries_per_game", "rush_yards_per_game", "targets_per_game"],
-    "WR": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game"],
-    "TE": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game"],
+    "QB": ["passing_yards_per_game", "passing_tds_per_game", "rush_yards_per_game", "interceptions_per_game"],
+    "RB": ["carries_per_game", "rush_yards_per_game", "targets_per_game", "total_tds_per_game"],
+    "WR": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game", "receiving_tds_per_game"],
+    "TE": ["targets_per_game", "receptions_per_game", "receiving_yards_per_game", "receiving_tds_per_game"],
 }
 CARD_METRIC_LABELS = {
     "passing_yards_per_game":   "Pass Yds/G",
     "passing_tds_per_game":     "Pass TD/G",
     "rush_yards_per_game":      "Rush Yds/G",
+    "interceptions_per_game":   "INT/G",
     "carries_per_game":         "Car/G",
     "targets_per_game":         "Tgt/G",
     "receptions_per_game":      "Rec/G",
     "receiving_yards_per_game": "Rec Yds/G",
+    "receiving_tds_per_game":   "TD/G",
+    "total_tds_per_game":       "TD/G",
 }
 
 _METRIC_FIELD = {
@@ -70,6 +72,9 @@ _METRIC_FIELD = {
     "passing_yards_per_game": "passing_yards",
     "rush_attempts_per_game": "carries",
     "passing_tds_per_game": "passing_tds",
+    "interceptions_per_game": "passing_interceptions",
+    "receiving_tds_per_game": "receiving_tds",
+    "total_tds_per_game": "_total_td",  # derived: rushing_tds + receiving_tds
 }
 
 _BLEND_SCHEDULE = {0: 0.40, 1: 0.55, 2: 0.70, 3: 0.80, 4: 0.90, 5: 0.90}
@@ -225,6 +230,13 @@ def _build_weekly_rows(player_stats, team_stats, player_name: str, team_abbr: st
                 round(r["carries"] / _team_carries, 3)
                 if r.get("carries") is not None and _team_carries else None
             )
+            # Combined rushing+receiving TDs — used by RB card total_tds_per_game.
+            _rush_td = r.get("rushing_tds")
+            _rec_td = r.get("receiving_tds")
+            if _rush_td is not None or _rec_td is not None:
+                r["_total_td"] = (_rush_td or 0) + (_rec_td or 0)
+            else:
+                r["_total_td"] = None
         return rows
     except Exception:
         return []
@@ -349,11 +361,11 @@ def get_usage_samples(player_name: str, team_full_name: str, position: str, metr
 
 def get_card_season_stats(player_name: str, team_full_name: str, position: str) -> list[dict]:
     """
-    The player card's 3-stat season snapshot — reuses get_usage_samples's
-    exact same season-averaging code, just a smaller position-specific
-    metric list (CARD_SEASON_METRICS). Returns [] if the player has no
-    current-season games at all (card should omit the stat row entirely,
-    never show fake 0.0s).
+    The player card's 4-stat season snapshot — reuses get_usage_samples's
+    exact same season-averaging code, just a position-specific metric
+    list (CARD_SEASON_METRICS). Returns [] if the player has no
+    current-season games at all (card should omit the stat panel
+    entirely, never show fake 0.0s).
     """
     metric_list = CARD_SEASON_METRICS.get(position, [])
     if not metric_list:
