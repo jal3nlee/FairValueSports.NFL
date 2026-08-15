@@ -26,8 +26,8 @@ def render_opponent_defense_single(opponent: str | None, position: str, scoring:
     One player's opponent-defense table — general season-long defensive
     stats for the opponent, aggregated across ALL offensive players they've
     faced league-wide. Not the selected player's personal history against
-    that team. Never takes a player name — the header is built entirely
-    from the opponent + position.
+    that team. The column header is JUST the team name — no "vs Position"
+    framing, since that phrasing kept reading as player-vs-team.
     """
     if not opponent:
         st.caption("No opponent this week (bye week).")
@@ -39,8 +39,7 @@ def render_opponent_defense_single(opponent: str | None, position: str, scoring:
         st.caption("Opponent defensive data is not available yet.")
         return
 
-    _header = f"{opponent} Defense vs {position}"
-    _rows = [{"Metric": label, _header: _def.get(field, "—")} for field, label in _metric_set]
+    _rows = [{"Metric": label, opponent: _def.get(field, "—")} for field, label in _metric_set]
     st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
     st.caption("Defensive data: nflverse")
 
@@ -50,6 +49,7 @@ def render_opponent_defense_multi(players_with_opponents: list[dict], scoring: s
     players_with_opponents: [{"name", "position", "opponent"}, ...] — used
     for Lineup Analysis's multi-player comparison. Same general opponent
     defensive stats as above, matched to each selected player's position.
+    Column headers are just each opponent's team name.
     """
     if all(not p.get("opponent") for p in players_with_opponents):
         st.caption("No opponent this week (bye week).")
@@ -68,10 +68,7 @@ def render_opponent_defense_multi(players_with_opponents: list[dict], scoring: s
     def_by_player = {
         p["name"]: get_opponent_defense(p.get("opponent"), position, scoring) for p in players_with_opponents
     }
-    headers = [
-        f"{p['opponent']} Defense vs {position}" if p.get("opponent") else "Bye Week"
-        for p in players_with_opponents
-    ]
+    headers = [p.get("opponent") or "Bye Week" for p in players_with_opponents]
 
     rows = []
     for field, label in metric_set:
