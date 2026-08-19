@@ -43,6 +43,13 @@ def _odds_value_in_format(american_price, fmt: str):
         return round(p * 100, 1) if p else None
 
 
+def _uncheck_no_min_odds(checkbox_key: str) -> None:
+    """on_change callback for the Minimum Odds number_input — editing the
+    value is itself the user's signal that they want the filter active, so
+    flip the paired "No minimum" checkbox off on that same rerun."""
+    st.session_state[checkbox_key] = False
+
+
 def _fmt_best_odds(american_price, fmt: str) -> str:
     if american_price is None or pd.isna(american_price):
         return "—"
@@ -146,9 +153,9 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         )
     with _sr2:
         # Bounds/steps match the old select_slider exactly per format — only
-        # the control changed. Widget keys are format-specific (like before)
-        # so switching Odds Format always resets to "No minimum" rather than
-        # carrying over a numeric value in the wrong units.
+        # the control changed. Widget keys are format-specific so switching
+        # Odds Format always starts fresh rather than carrying over a
+        # numeric value (or a stale "No minimum" state) in the wrong units.
         if _odds_format == "American":
             _odds_fmt_key = "american"
             _min_odds_kwargs = dict(min_value=-500, max_value=500, value=-110, step=5)
@@ -159,16 +166,14 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
             _odds_fmt_key = "implied"
             _min_odds_kwargs = dict(min_value=0.0, max_value=100.0, value=52.4, step=0.1, format="%.1f")
 
-        _no_min_odds = st.checkbox(
-            "No minimum", value=True, key=f"fvm_min_odds_no_min_{_odds_fmt_key}",
+        _no_min_odds_key = f"fvm_min_odds_no_min_{_odds_fmt_key}"
+        # Always visible, never disabled — editing it is handled by the
+        # on_change callback below rather than by hiding/disabling the input.
+        _min_odds_raw = st.number_input(
+            "Minimum Odds", key=f"fvm_min_odds_val_{_odds_fmt_key}",
+            on_change=_uncheck_no_min_odds, args=(_no_min_odds_key,),
+            **_min_odds_kwargs,
         )
-        if _no_min_odds:
-            _min_odds_sel = None
-        else:
-            _min_odds_raw = st.number_input(
-                "Minimum Odds", key=f"fvm_min_odds_val_{_odds_fmt_key}", **_min_odds_kwargs,
-            )
-            _min_odds_sel = float(_min_odds_raw)
 
     # ── Sportsbook filter ────────────────────────────────────
     _all_books_raw = sorted(set(
@@ -203,7 +208,12 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
     for d in _book_sel_disp:
         _book_sel_keys |= _book_disp_to_keys.get(d, set())
 
-    _show_all_bets = st.checkbox("Show all bets (include negative EV)", value=False, key="fvm_show_all")
+    _show_col, _no_min_col = st.columns(2)
+    with _show_col:
+        _show_all_bets = st.checkbox("Show all bets (include negative EV)", value=False, key="fvm_show_all")
+    with _no_min_col:
+        _no_min_odds = st.checkbox("No minimum", value=True, key=_no_min_odds_key)
+    _min_odds_sel = None if _no_min_odds else float(_min_odds_raw)
     st.divider()
 
     if df_all.empty:

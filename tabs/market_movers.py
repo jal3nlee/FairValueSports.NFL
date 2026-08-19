@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from core.odds_math import parse_iso_dt_utc, fmt_odds, EASTERN
+from core.odds_math import parse_iso_dt_utc, EASTERN
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
 
@@ -135,9 +135,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
             if _top_ev.empty:
                 st.info("No positive EV opportunities were identified at this time.")
             else:
-                for _i, (_, _r) in enumerate(_top_ev.iterrows(), 1):
-                    _fo_val = _r.get("mi_fair_odds_a") or _r.get("mi_fair_odds_b")
-                    _fo_str = fmt_odds(_fo_val) if _fo_val else "—"
+                for _, _r in _top_ev.iterrows():
                     _game = _r.get("Game", "—")
                     _teams = _game.split(" vs ") if isinstance(_game, str) else []
                     _home_team = _teams[0] if len(_teams) == 2 else None
@@ -157,14 +155,16 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
                         else:
                             st.markdown(f"**{_game}**")
 
-                        st.caption(f"#{_i} · {_r.get('Market', '—')} · Pick: {_r.get('Pick', '—')}")
+                        st.caption(f"{_r.get('Market', '—')} · Pick: {_r.get('Pick', '—')}")
 
-                        _c1, _c2, _c3, _c4 = st.columns(4)
-                        _c1.metric("Best Odds", _r.get("Best Odds", "—"))
-                        _c2.metric("Fair Odds", _fo_str)
-                        _c3.metric("Fair Win %", _r.get("Fair Win %", "—"))
-                        _c4.metric("EV%", _r.get("EV%", "—"))
-                        st.caption(f"Best price at **{_sc_name(_r.get('Best Book', '—'))}**")
+                        st.dataframe(
+                            pd.DataFrame([{
+                                "Best Book": _sc_name(_r.get("Best Book", "—")),
+                                "Best Odds": _r.get("Best Odds", "—"),
+                                "EV%": _r.get("EV%", "—"),
+                            }]),
+                            use_container_width=True, hide_index=True, height=38 + 35,
+                        )
 
             st.caption("See the full list of positive EV opportunities below.")
 
