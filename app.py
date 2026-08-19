@@ -102,7 +102,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 SIDEBAR_W = 320
-DEBUG_MODE = True
+DEBUG_MODE = False
 # =======================
 # SIDEBAR UI
 # =======================
