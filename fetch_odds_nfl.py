@@ -1,5 +1,6 @@
 # fetch_odds_nfl.py
 import os
+import time
 import uuid
 import requests
 from datetime import datetime, timezone
@@ -18,6 +19,79 @@ ODDS_API_SPORT_KEYS = ["americanfootball_nfl", "americanfootball_nfl_preseason"]
 SPORT = "NFL"
 BATCH_SIZE = 500
 
+# ── Retry/backoff for the Odds API request ──
+REQUEST_TIMEOUT = 15        # seconds, per attempt
+MAX_ATTEMPTS = 4            # total attempts, including the first — not "4 retries"
+BACKOFF_BASE_SECONDS = 1.0  # doubles each retry: 1s, 2s, 4s, ...
+BACKOFF_MAX_SECONDS = 30.0  # cap on any single computed delay
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _parse_retry_after(resp):
+    """Defensively parse a Retry-After header (seconds or HTTP-date not
+    supported — only the common numeric-seconds form). Returns None if
+    absent or unparseable, so the caller falls back to normal backoff."""
+    raw = resp.headers.get("Retry-After") if resp is not None else None
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, BACKOFF_MAX_SECONDS)
+
+
+def _fetch_odds_with_retries(url: str, params: dict, label: str):
+    """
+    GETs the Odds API with bounded retries for transient failures only:
+    network errors, timeouts, HTTP 429, and 5xx. Permanent 4xx errors
+    (bad key, bad request, etc.) are returned immediately without retry,
+    same as the prior non-retrying behavior. Returns the Response on
+    success or on a non-retryable status; returns None if every attempt
+    was exhausted on a transient failure.
+    """
+    last_resp = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        except requests.exceptions.RequestException as e:
+            print(f"Request error for {label} (attempt {attempt}/{MAX_ATTEMPTS}): {type(e).__name__}: {e}")
+            if attempt == MAX_ATTEMPTS:
+                print(f"Giving up on {label} after {MAX_ATTEMPTS} attempts — skipping this sport key.")
+                return None
+            delay = min(BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), BACKOFF_MAX_SECONDS)
+            time.sleep(delay)
+            continue
+
+        last_resp = resp
+        if resp.status_code == 200:
+            return resp
+
+        if resp.status_code not in RETRYABLE_STATUS_CODES:
+            # Permanent client error (e.g. 401/403/400) — do not retry.
+            return resp
+
+        if attempt == MAX_ATTEMPTS:
+            print(
+                f"Giving up on {label} after {MAX_ATTEMPTS} attempts — "
+                f"last status {resp.status_code}: {resp.text}"
+            )
+            return None
+
+        retry_after = _parse_retry_after(resp)
+        delay = retry_after if retry_after is not None else min(
+            BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), BACKOFF_MAX_SECONDS
+        )
+        print(
+            f"Transient error for {label} (attempt {attempt}/{MAX_ATTEMPTS}): "
+            f"status {resp.status_code} — retrying in {delay:.1f}s"
+        )
+        time.sleep(delay)
+
+    return last_resp
+
 
 def run_pull():
     total_rows = 0
@@ -31,9 +105,10 @@ def run_pull():
             "markets":    ",".join(markets),
             "oddsFormat": "american",
         }
-        resp = requests.get(url, params=params)
-        if resp.status_code != 200:
-            print(f"Error for {odds_api_sport_key}:", resp.status_code, resp.text)
+        resp = _fetch_odds_with_retries(url, params, label=odds_api_sport_key)
+        if resp is None or resp.status_code != 200:
+            if resp is not None:
+                print(f"Error for {odds_api_sport_key}:", resp.status_code, resp.text)
             continue
         data = resp.json()
         if not data:
