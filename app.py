@@ -6,7 +6,6 @@ from pathlib import Path
 from PIL import Image
 from supabase import create_client, Client
 from streamlit_cookies_manager import EncryptedCookieManager
-
 from core.data_sources import infer_current_week_index
 from tabs import (
     market_movers,
@@ -19,32 +18,25 @@ from tabs import (
     parlay_builder,
     arbitrage_tracker,
 )
-
 # =======================
 # AUTH
 # =======================
 SUPABASE_URL      = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 COOKIE_SECRET     = os.getenv("COOKIE_SECRET", "")
-
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
     st.error("Auth not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY to environment.")
     st.stop()
-
 if not COOKIE_SECRET:
     st.error("COOKIE_SECRET is not set. Add it to your environment variables.")
     st.stop()
-
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
 cookies = EncryptedCookieManager(prefix="fvb_", password=COOKIE_SECRET)
 if not cookies.ready():
     st.stop()
-
 st.session_state.setdefault("sb_access_token", None)
 st.session_state.setdefault("sb_refresh_token", None)
 st.session_state.setdefault("sb_session", None)
-
 if (
     cookies.get("access_token")
     and cookies.get("refresh_token")
@@ -59,8 +51,6 @@ if (
         st.session_state.sb_refresh_token = cookies.get("refresh_token")
     except Exception as e:
         st.warning(f"Could not restore login session: {e}")
-
-
 def save_session(sess, remember=False):
     st.session_state.sb_session = sess
     st.session_state.sb_access_token = sess.access_token
@@ -69,35 +59,26 @@ def save_session(sess, remember=False):
         cookies["access_token"] = sess.access_token
         cookies["refresh_token"] = sess.refresh_token
         cookies.save()
-
-
 def clear_session():
     st.session_state.sb_session = None
     st.session_state.sb_access_token = None
     st.session_state.sb_refresh_token = None
     cookies.clear()
     cookies.save()
-
-
 authed = bool(
     st.session_state.sb_access_token and st.session_state.sb_refresh_token
 )
-
 # =======================
 # BRANDING
 # =======================
 ROOT       = Path(__file__).parent.resolve()
 ASSET_DIRS = [ROOT / "assets", ROOT / ".streamlit" / "assets"]
-
-
 def find_asset(name: str):
     for d in ASSET_DIRS:
         p = d / name
         if p.is_file():
             return p
     return None
-
-
 def newest_favicon():
     cands = []
     for d in ASSET_DIRS:
@@ -106,28 +87,22 @@ def newest_favicon():
     if not cands:
         return None
     return max(cands, key=lambda p: p.stat().st_mtime)
-
-
 LOGO_PATH    = find_asset("logo.png")
 FAVICON_PATH = newest_favicon()
-
 favicon_img = None
 if FAVICON_PATH:
     try:
         favicon_img = Image.open(FAVICON_PATH)
     except Exception:
         favicon_img = None
-
 st.set_page_config(
     page_title="Fair Value Betting",
     page_icon=(favicon_img if favicon_img else "🏈"),
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 SIDEBAR_W = 320
 DEBUG_MODE = True
-
 # =======================
 # SIDEBAR UI
 # =======================
@@ -136,15 +111,12 @@ with st.sidebar:
         st.image(str(LOGO_PATH), width=SIDEBAR_W)
     else:
         st.title("Fair Value Betting")
-
     st.markdown(
         "[fairvaluebetting.com](https://fairvaluebetting.com)  ·  "
         "⚾ [MLB](https://mlb.fairvaluebetting.com)  ·  "
         "🏈 [NCAAF](https://ncaaf.fairvaluebetting.com)"
     )
-
     st.sidebar.divider()
-
     if authed:
         user = supabase.auth.get_user()
         user_email = (
@@ -153,7 +125,6 @@ with st.sidebar:
             else None
         )
         st.success(f"Signed in{f' as {user_email}' if user_email else ''}.")
-
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Log out", use_container_width=True):
@@ -165,18 +136,15 @@ with st.sidebar:
                 cookies.clear()
                 cookies.save()
                 st.rerun()
-
     else:
         st.info(
             "Free full access in September — create a free account to unlock filters and sorting."
         )
-
         with st.form("login_form_sidebar", clear_on_submit=False, border=True):
             email       = st.text_input("Email", key="signin_email_sidebar")
             password    = st.text_input("Password", type="password", key="signin_pw_sidebar")
             remember_me = st.checkbox("Keep me logged in", value=True)
             submit      = st.form_submit_button("Sign in", use_container_width=True)
-
         if submit:
             try:
                 res  = supabase.auth.sign_in_with_password(
@@ -194,7 +162,6 @@ with st.sidebar:
                     st.error("Invalid email or password.")
                 else:
                     st.error(f"Sign-in failed: {e}")
-
         with st.expander("Create account", expanded=False):
             full_name = st.text_input("Name", key="signup_name_sidebar")
             email2    = st.text_input("Email", key="signup_email_sidebar")
@@ -217,8 +184,6 @@ with st.sidebar:
                         st.success("Account created! Check your email to verify, then sign in.")
                     except Exception as e:
                         st.error(f"Sign-up failed: {str(e) or 'Try again.'}")
-
-
 with st.sidebar.expander("How to use", expanded=False):
     st.markdown(
         """
@@ -237,7 +202,6 @@ with st.sidebar.expander("How to use", expanded=False):
    each side, across different books, guarantees a profit regardless of outcome.
         """
     )
-
 with st.sidebar.expander("Glossary", expanded=False):
     st.markdown(
         """
@@ -245,14 +209,12 @@ with st.sidebar.expander("Glossary", expanded=False):
 **Fair Odds** — The American-odds equivalent of the weighted, no-vig sportsbook consensus.
         """
     )
-
 with st.sidebar.expander("Feedback", expanded=False):
     _fb_user = None
     try:
         _fb_user = getattr(st.session_state.get("sb_session", None), "user", None)
     except Exception:
         _fb_user = None
-
     if not _fb_user:
         st.info("You must be signed in to leave feedback.")
     else:
@@ -262,7 +224,6 @@ with st.sidebar.expander("Feedback", expanded=False):
             st.markdown(f"**Submitting as:** {_full_name or 'Unknown'}  \n**Email:** {_email_addr or 'Unknown'}")
             feedback_text = st.text_area("Share your thoughts, ideas, or issues:")
             submitted     = st.form_submit_button("Submit Feedback")
-
         if submitted:
             txt = (feedback_text or "").strip()
             if not txt:
@@ -280,24 +241,19 @@ with st.sidebar.expander("Feedback", expanded=False):
                     st.success("Thanks for your feedback!")
                 except Exception as e:
                     st.error(f"Error saving feedback: {e}")
-
 with st.sidebar.expander("Disclaimer", expanded=False):
     st.markdown(
         """
 **Fair Value Betting** is for **education and entertainment** only — not financial or betting advice.
         """
     )
-
-
 # =======================
 # MAIN APP
 # =======================
 def run_app():
     now_utc = datetime.now(timezone.utc)
-
     eff_bankroll = 1000.0
     eff_kelly = 0.5
-
     tabs = st.tabs([
         "Market Movers",
         "Fair Value Model",
@@ -309,34 +265,23 @@ def run_app():
         "Parlay Builder",
         "Arbitrage Tracker",
     ])
-
     with tabs[0]:
         market_movers.render(supabase, now_utc, eff_bankroll, eff_kelly)
-
     with tabs[1]:
         fair_value_model.render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=DEBUG_MODE)
-
     with tabs[2]:
         matchup_center.render(supabase, now_utc, eff_bankroll, eff_kelly)
-
     with tabs[3]:
         lineup_comparison.render(supabase, now_utc)
-
     with tabs[4]:
         fantasy_draft.render()
-
     with tabs[5]:
         prop_leaderboard.render(supabase, now_utc)
-
     with tabs[6]:
         sportsbook_screener.render(supabase, now_utc)
-
     with tabs[7]:
         parlay_builder.render(supabase, now_utc, eff_bankroll, eff_kelly, authed)
-
     with tabs[8]:
         arbitrage_tracker.render(supabase, now_utc, eff_bankroll, eff_kelly)
-
-
 if __name__ == "__main__":
     run_app()
