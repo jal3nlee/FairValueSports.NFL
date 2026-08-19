@@ -8,7 +8,6 @@ from supabase import create_client, Client
 from streamlit_cookies_manager import EncryptedCookieManager
 from core.data_sources import infer_current_week_index
 from tabs import (
-    market_movers,
     fair_value_model,
     matchup_center,
     lineup_comparison,
@@ -187,18 +186,18 @@ with st.sidebar:
 with st.sidebar.expander("How to use", expanded=False):
     st.markdown(
         """
-1. **Market Movers** — a quick snapshot of today's slate and the top EV plays.
-2. **Fair Value Model** — pick a Date Range and Market, filter by Expected Value
-   and Odds, and compare Best Odds against our Fair Odds estimate.
-3. **Matchup Center** — dig into any individual game's market snapshot and research.
-4. **Lineup Analysis** — research weekly usage, props, game environment, and matchup context for one player, or compare up to four.
-5. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
-6. **Prop Research** — research an individual player's props, season stats, recent
+1. **Fair Value Model** — starts with a Market Movers snapshot of today's slate and
+   the top EV plays, then lets you pick a Date Range and Market, filter by Expected
+   Value and Odds, and compare Best Odds against our Fair Odds estimate.
+2. **Matchup Center** — dig into any individual game's market snapshot and research.
+3. **Lineup Analysis** — research weekly usage, props, game environment, and matchup context for one player, or compare up to four.
+4. **Fantasy Draft** — consensus ADP rankings across platforms, filterable by position.
+5. **Prop Research** — research an individual player's props, season stats, recent
    games, and matchup context directly, or find the top players on the best current
    hit-rate streak for a selected prop.
-7. **Sportsbook Screener** — pure line shopping across every sportsbook.
-8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
-9. **Arbitrage Tracker** — scan current prices for markets where the best price on
+6. **Sportsbook Screener** — pure line shopping across every sportsbook.
+7. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
+8. **Arbitrage Tracker** — scan current prices for markets where the best price on
    each side, across different books, guarantees a profit regardless of outcome.
         """
     )
@@ -255,7 +254,6 @@ def run_app():
     eff_bankroll = 1000.0
     eff_kelly = 0.5
     tabs = st.tabs([
-        "Market Movers",
         "Fair Value Model",
         "Matchup Center",
         "Lineup Analysis",
@@ -266,22 +264,20 @@ def run_app():
         "Arbitrage Tracker",
     ])
     with tabs[0]:
-        market_movers.render(supabase, now_utc, eff_bankroll, eff_kelly)
-    with tabs[1]:
         fair_value_model.render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=DEBUG_MODE)
-    with tabs[2]:
+    with tabs[1]:
         matchup_center.render(supabase, now_utc, eff_bankroll, eff_kelly)
-    with tabs[3]:
+    with tabs[2]:
         lineup_comparison.render(supabase, now_utc)
-    with tabs[4]:
+    with tabs[3]:
         fantasy_draft.render()
-    with tabs[5]:
+    with tabs[4]:
         prop_leaderboard.render(supabase, now_utc)
-    with tabs[6]:
+    with tabs[5]:
         sportsbook_screener.render(supabase, now_utc)
-    with tabs[7]:
+    with tabs[6]:
         parlay_builder.render(supabase, now_utc, eff_bankroll, eff_kelly, authed)
-    with tabs[8]:
+    with tabs[7]:
         arbitrage_tracker.render(supabase, now_utc, eff_bankroll, eff_kelly)
 if __name__ == "__main__":
     run_app()

@@ -7,6 +7,7 @@ from core.odds_math import (
 )
 from core.pipeline import MARKETS, run_market_pipeline, PipelineTrace
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window
+from tabs import market_movers
 
 
 def _sc_name(book: str) -> str:
@@ -56,6 +57,8 @@ def _fmt_best_odds(american_price, fmt: str) -> str:
 
 
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False):
+    market_movers.render(supabase, now_utc, eff_bankroll, eff_kelly)
+
     if not authed:
         st.info("Sign in to access the Fair Value Model.")
         return

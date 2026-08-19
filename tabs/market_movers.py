@@ -125,10 +125,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
                 })
             st.dataframe(pd.DataFrame(_rows).set_index("Rank"), use_container_width=True)
 
-        st.caption("View the complete list of positive EV opportunities in the **Fair Value Model** tab.")
+        st.caption("See the full list of positive EV opportunities below.")
 
     st.divider()
-    st.caption(
-        "Use **Fair Value Model** to find positive EV opportunities.  "
-        "Use **Matchup Center** to research a specific game."
-    )
+    st.caption("Use **Matchup Center** to research a specific game.")

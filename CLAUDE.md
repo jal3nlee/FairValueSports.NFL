@@ -80,15 +80,19 @@ nflverse/ESPN data, by contrast, **is** fetched live from within the running app
 
 Registered in `app.py` (`run_app()`), in this order:
 
-1. **Market Movers** (`tabs/market_movers.py`) — weekly snapshot: game/book/market counts, latest odds pull time, top 3 EV plays.
-2. **Fair Value Model** (`tabs/fair_value_model.py`) — the main product: filterable table of Best Odds vs. Fair Odds across Moneyline/Spread/Total, by date range, EV%, and fair-win%. **Gated behind sign-in** (`authed` check).
-3. **Matchup Center** (`tabs/matchup_center.py`) — single-game deep dive.
-4. **Lineup Analysis** (`tabs/lineup_comparison.py`) — player usage/props/matchup research; compare up to 4 players.
-5. **Fantasy Draft** (`tabs/fantasy_draft.py`) — consensus ADP rankings from `data/fantasy_adp.xlsx`, filterable by position.
-6. **Prop Research** (`tabs/prop_leaderboard.py`) — individual player props + best current hit-rate streaks.
-7. **Sportsbook Screener** (`tabs/sportsbook_screener.py`) — pure line shopping.
-8. **Parlay Builder** (`tabs/parlay_builder.py`) — multi-leg parlay comparison across books.
-9. **Arbitrage Tracker** (`tabs/arbitrage_tracker.py`) — guaranteed-profit two-sided price mismatches, built on `core/arbitrage_engine.py`.
+1. **Fair Value Model** (`tabs/fair_value_model.py`) — the main product. Opens with a Market
+   Movers snapshot (`tabs/market_movers.py::render`, reused/called directly — not a separate
+   top-level tab; renders regardless of sign-in status), followed by the filterable table of
+   Best Odds vs. Fair Odds across Moneyline/Spread/Total, by date range, EV%, and fair-win%.
+   The Market Movers section is unauthenticated; the filters/table below it are **gated behind
+   sign-in** (`authed` check).
+2. **Matchup Center** (`tabs/matchup_center.py`) — single-game deep dive.
+3. **Lineup Analysis** (`tabs/lineup_comparison.py`) — player usage/props/matchup research; compare up to 4 players.
+4. **Fantasy Draft** (`tabs/fantasy_draft.py`) — consensus ADP rankings from `data/fantasy_adp.xlsx`, filterable by position.
+5. **Prop Research** (`tabs/prop_leaderboard.py`) — individual player props + best current hit-rate streaks.
+6. **Sportsbook Screener** (`tabs/sportsbook_screener.py`) — pure line shopping.
+7. **Parlay Builder** (`tabs/parlay_builder.py`) — multi-leg parlay comparison across books.
+8. **Arbitrage Tracker** (`tabs/arbitrage_tracker.py`) — guaranteed-profit two-sided price mismatches, built on `core/arbitrage_engine.py`.
 
 `tabs/player_research.py` exists but is **not registered in `app.py`** — it's an explicit stub
 ("pending a data source decision"). Don't assume it's live; don't wire it in without being asked.
