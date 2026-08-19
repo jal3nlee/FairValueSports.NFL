@@ -327,7 +327,12 @@ def format_display_df(df: pd.DataFrame) -> pd.DataFrame:
     df["Fair Win %"] = (df["Fair Win %"] * 100).map(lambda x: f"{x:.1f}%")
     df["EV%"] = df["EV%"].map(fmt_ev)
     df["Kelly (u)"] = df["Kelly (u)"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "")
-    return df.drop(columns=["_ev_raw", "_fair_raw"], errors="ignore")
+    # _fair_raw (the unrounded fair probability) is kept for callers that
+    # need to recompute EV against a filtered subset of books — e.g.
+    # tabs/fair_value_model.py — without losing precision to the rounded
+    # "Fair Win %" display string. It's still an internal `_`-prefixed
+    # column, so display code must not add it to any user-facing table.
+    return df.drop(columns=["_ev_raw"], errors="ignore")
 
 
 # =======================

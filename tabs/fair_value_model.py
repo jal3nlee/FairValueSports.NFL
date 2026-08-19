@@ -223,8 +223,6 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         st.info("Select at least one sportsbook to see betting opportunities.")
         return
 
-    _fw_num = pd.to_numeric(df_all["Fair Win %"].astype(str).str.replace("%", "", regex=False), errors="coerce")
-
     def _recompute_row(row):
         cfg = _label_to_cfg.get(row.get("Market"))
         book_table = row.get("mi_book_table")
@@ -255,8 +253,13 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
                 best_book_key = b.get("_book_key")
         if best_price is None:
             return pd.Series({"_new_best_odds": None, "_new_best_book": None, "_new_ev_num": None, "_new_fair_odds": None})
-        fw = row.get("_fw_num")
-        fair_raw = (fw / 100.0) if pd.notna(fw) else None
+        # Use the pipeline's full-precision fair probability directly rather
+        # than reconstructing it from the already-1-decimal-rounded "Fair
+        # Win %" display string — that rounding previously caused this
+        # recomputed EV to drift slightly from the canonical EV%/Top Plays
+        # value for the same pick/price.
+        fw_raw = row.get("_fair_raw")
+        fair_raw = float(fw_raw) if pd.notna(fw_raw) else None
         new_ev = expected_value_pct(fair_raw, best_price) if fair_raw is not None else None
         return pd.Series({
             "_new_best_odds": best_price,
@@ -266,7 +269,6 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         })
 
     _filt = df_all.copy()
-    _filt["_fw_num"] = _fw_num
     if _mkt_sel != "All":
         _filt = _filt[_filt["Market"] == _mkt_sel]
     _filt = pd.concat([_filt, _filt.apply(_recompute_row, axis=1)], axis=1)
