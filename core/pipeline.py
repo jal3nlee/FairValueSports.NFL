@@ -303,8 +303,18 @@ def build_display_rows(df_in: pd.DataFrame, cfg: MarketConfig, bankroll: float, 
         sub["Stake ($)"] = (bankroll * kf * sub["_kelly"]).round(2)
         if cfg.display_line:
             line_key = "line" if "line" in sub.columns else "total"
+            # "line" is normalized to the home side's sign for grouping (see
+            # build_books_df) and carried through unchanged to this point, so
+            # it's still home's sign here regardless of which side's sub-frame
+            # we're building. Flip it back for the away side's own display —
+            # mirrors the same negation sportsbook_screener.py already does
+            # for its away-side spread label.
+            _is_away_side = cfg.odds_api_market == "spreads" and price_col == cfg.price_b_col
             sub["Line"] = sub[line_key].apply(
-                lambda l: (f"{float(l):+g}" if cfg.odds_api_market == "spreads" else f"{float(l):.1f}") if pd.notna(l) else ""
+                lambda l: (
+                    (f"{-float(l):+g}" if _is_away_side else f"{float(l):+g}")
+                    if cfg.odds_api_market == "spreads" else f"{float(l):.1f}"
+                ) if pd.notna(l) else ""
             )
         all_rows.append(sub)
     if not all_rows:
