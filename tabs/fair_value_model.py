@@ -229,13 +229,19 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         cfg = _label_to_cfg.get(row.get("Market"))
         book_table = row.get("mi_book_table")
         if cfg is None or not isinstance(book_table, list) or not book_table:
-            return pd.Series({"_new_best_odds": None, "_new_best_book": None, "_new_ev_num": None})
+            return pd.Series({"_new_best_odds": None, "_new_best_book": None, "_new_ev_num": None, "_new_fair_odds": None})
         game_parts = str(row.get("Game", "")).split(" vs ")
         home_team = game_parts[0] if len(game_parts) == 2 else None
         pick_label = row.get("Pick", "")
         pick_is_a = (
             pick_label == "Over" if pick_label in ("Over", "Under") else pick_label == home_team
         )
+        # mi_fair_odds_a/mi_fair_odds_b are both attached to every row of a
+        # game (build_market_intelligence merges them at the game level, not
+        # per side) — select the one matching this row's own Pick using the
+        # same pick_is_a test already used for Best Odds/EV below, rather
+        # than defaulting to side A whenever it happens to be truthy.
+        fair_odds_val = row.get("mi_fair_odds_a") if pick_is_a else row.get("mi_fair_odds_b")
         odds_key = "_odds_a_raw" if pick_is_a else "_odds_b_raw"
         best_price, best_book_key = None, None
         for b in book_table:
@@ -248,7 +254,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
                 best_price = p
                 best_book_key = b.get("_book_key")
         if best_price is None:
-            return pd.Series({"_new_best_odds": None, "_new_best_book": None, "_new_ev_num": None})
+            return pd.Series({"_new_best_odds": None, "_new_best_book": None, "_new_ev_num": None, "_new_fair_odds": None})
         fw = row.get("_fw_num")
         fair_raw = (fw / 100.0) if pd.notna(fw) else None
         new_ev = expected_value_pct(fair_raw, best_price) if fair_raw is not None else None
@@ -256,6 +262,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
             "_new_best_odds": best_price,
             "_new_best_book": _sc_name(best_book_key) if best_book_key else None,
             "_new_ev_num": new_ev,
+            "_new_fair_odds": fair_odds_val,
         })
 
     _filt = df_all.copy()
@@ -291,9 +298,7 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
         return
 
     _filt["Best Odds"] = _filt["_new_best_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
-    _filt["Fair Odds"] = _filt.apply(
-        lambda r: _fmt_best_odds(r.get("mi_fair_odds_a") or r.get("mi_fair_odds_b"), _odds_format), axis=1,
-    )
+    _filt["Fair Odds"] = _filt["_new_fair_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
     _filt["Best Book"] = _filt["_new_best_book"].fillna("—")
     _filt["Expected Value"] = _filt["_new_ev_num"].apply(fmt_ev)
 
