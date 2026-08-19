@@ -140,9 +140,9 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
     # ── Row 2: Minimum Expected Value · Minimum Odds ────────
     _sr1, _sr2 = st.columns(2)
     with _sr1:
-        _min_ev_sel = st.slider(
-            "Minimum Expected Value", min_value=0.0, max_value=10.0, value=0.0, step=0.5,
-            format="%.1f%%", key="fvm_min_ev_slider",
+        _min_ev_sel = st.number_input(
+            "Minimum Expected Value (%)", min_value=0.0, max_value=10.0, value=0.0, step=0.5,
+            key="fvm_min_ev",
         )
     with _sr2:
         if _odds_format == "American":
