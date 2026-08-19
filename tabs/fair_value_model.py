@@ -145,19 +145,30 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
             key="fvm_min_ev",
         )
     with _sr2:
+        # Bounds/steps match the old select_slider exactly per format — only
+        # the control changed. Widget keys are format-specific (like before)
+        # so switching Odds Format always resets to "No minimum" rather than
+        # carrying over a numeric value in the wrong units.
         if _odds_format == "American":
-            _odds_options = ["No minimum"] + list(range(-500, 505, 5))
-            _odds_key = "fvm_min_odds_american"
+            _odds_fmt_key = "american"
+            _min_odds_kwargs = dict(min_value=-500, max_value=500, value=-110, step=5)
         elif _odds_format == "Decimal":
-            _odds_options = ["No minimum"] + [round(0.05 * i, 2) for i in range(0, 201)]
-            _odds_key = "fvm_min_odds_decimal"
+            _odds_fmt_key = "decimal"
+            _min_odds_kwargs = dict(min_value=0.0, max_value=10.0, value=1.91, step=0.05, format="%.2f")
         else:
-            _odds_options = ["No minimum"] + list(range(0, 101, 1))
-            _odds_key = "fvm_min_odds_implied"
-        _min_odds_raw = st.select_slider(
-            "Minimum Odds", options=_odds_options, value="No minimum", key=_odds_key,
+            _odds_fmt_key = "implied"
+            _min_odds_kwargs = dict(min_value=0.0, max_value=100.0, value=52.4, step=0.1, format="%.1f")
+
+        _no_min_odds = st.checkbox(
+            "No minimum", value=True, key=f"fvm_min_odds_no_min_{_odds_fmt_key}",
         )
-        _min_odds_sel = None if _min_odds_raw == "No minimum" else float(_min_odds_raw)
+        if _no_min_odds:
+            _min_odds_sel = None
+        else:
+            _min_odds_raw = st.number_input(
+                "Minimum Odds", key=f"fvm_min_odds_val_{_odds_fmt_key}", **_min_odds_kwargs,
+            )
+            _min_odds_sel = float(_min_odds_raw)
 
     # ── Sportsbook filter ────────────────────────────────────
     _all_books_raw = sorted(set(

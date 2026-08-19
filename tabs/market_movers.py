@@ -20,6 +20,29 @@ def _sc_name(book: str) -> str:
     return _display.get(str(book).lower(), str(book).replace("_", " ").title())
 
 
+# Same team-abbreviation map and ESPN CDN logo URL pattern already used by
+# Sportsbook Screener / Matchup Center / Parlay Builder — reused as-is rather
+# than introducing a second logo dataset.
+NFL_TEAM_ABBR = {
+    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
+    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
+    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
+    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
+    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
+    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
+    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
+    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
+    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
+    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
+    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
+}
+
+
+def _logo_url(team_name: str) -> str | None:
+    abbr = NFL_TEAM_ABBR.get(team_name)
+    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{abbr}.png" if abbr else None
+
+
 def render(supabase, now_utc, eff_bankroll, eff_kelly):
     # ── This-week data — independent of the Fair Value Model's Date Range.
     # NFL games cluster on Thu/Sun/Mon, so a literal "Today" window (the
@@ -112,22 +135,36 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
             if _top_ev.empty:
                 st.info("No positive EV opportunities were identified at this time.")
             else:
-                _rows = []
                 for _i, (_, _r) in enumerate(_top_ev.iterrows(), 1):
                     _fo_val = _r.get("mi_fair_odds_a") or _r.get("mi_fair_odds_b")
                     _fo_str = fmt_odds(_fo_val) if _fo_val else "—"
-                    _rows.append({
-                        "Rank": _i,
-                        "Game": _r.get("Game", "—"),
-                        "Pick": _r.get("Pick", "—"),
-                        "Market": _r.get("Market", "—"),
-                        "Best Book": _sc_name(_r.get("Best Book", "—")),
-                        "Best Odds": _r.get("Best Odds", "—"),
-                        "Fair Odds": _fo_str,
-                        "Fair Win %": _r.get("Fair Win %", "—"),
-                        "EV%": _r.get("EV%", "—"),
-                    })
-                st.dataframe(pd.DataFrame(_rows).set_index("Rank"), use_container_width=True)
+                    _game = _r.get("Game", "—")
+                    _teams = _game.split(" vs ") if isinstance(_game, str) else []
+                    _home_team = _teams[0] if len(_teams) == 2 else None
+                    _away_team = _teams[1] if len(_teams) == 2 else None
+                    _away_logo = _logo_url(_away_team) if _away_team else None
+                    _home_logo = _logo_url(_home_team) if _home_team else None
+
+                    with st.container(border=True):
+                        if _away_logo and _home_logo:
+                            st.markdown(
+                                f"<img src='{_away_logo}' width='22' style='vertical-align:middle;margin-right:5px'/>"
+                                f"**{_away_team}** @ "
+                                f"<img src='{_home_logo}' width='22' style='vertical-align:middle;margin:0 5px'/>"
+                                f"**{_home_team}**",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(f"**{_game}**")
+
+                        st.caption(f"#{_i} · {_r.get('Market', '—')} · Pick: {_r.get('Pick', '—')}")
+
+                        _c1, _c2, _c3, _c4 = st.columns(4)
+                        _c1.metric("Best Odds", _r.get("Best Odds", "—"))
+                        _c2.metric("Fair Odds", _fo_str)
+                        _c3.metric("Fair Win %", _r.get("Fair Win %", "—"))
+                        _c4.metric("EV%", _r.get("EV%", "—"))
+                        st.caption(f"Best price at **{_sc_name(_r.get('Best Book', '—'))}**")
 
             st.caption("See the full list of positive EV opportunities below.")
 
