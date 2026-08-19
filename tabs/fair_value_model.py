@@ -63,19 +63,48 @@ def _fmt_best_odds(american_price, fmt: str) -> str:
         return f"{p * 100:.1f}%" if p else "—"
 
 
-def _pick_market_label(row) -> str:
-    """Combines Pick + Line (when present) + Market into one compact string
-    for the primary results table and the Bet Details selector, e.g.
-    'Green Bay Packers (Moneyline)' or 'Over 44.5 (Total)'."""
+# Same team-abbreviation map already used by Sportsbook Screener / Matchup
+# Center / Parlay Builder / Market Movers — reused as-is for the compact
+# "Bet" column below rather than introducing a second mapping.
+NFL_TEAM_ABBR = {
+    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
+    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
+    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
+    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
+    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
+    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
+    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
+    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
+    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
+    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
+    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
+}
+
+
+def _abbr(team_name) -> str:
+    mapped = NFL_TEAM_ABBR.get(team_name)
+    return mapped.upper() if mapped else (team_name or "—")
+
+
+def _bet_compact_label(row) -> str:
+    """One mobile-friendly string identifying the exact bet, e.g.
+    'GB ML @ DEN', 'MIA +2.5 @ NYG', or 'Over 36.5 · CIN @ CHI'."""
+    game = row.get("Game", "")
+    teams = game.split(" vs ") if isinstance(game, str) else []
+    home_team = teams[0] if len(teams) == 2 else None
+    away_team = teams[1] if len(teams) == 2 else None
+    market = row.get("Market", "")
     pick = row.get("Pick", "—")
     line = row.get("Line")
-    market = row.get("Market", "—")
-    pick_text = f"{pick} {line}" if pd.notna(line) and str(line).strip() else pick
-    return f"{pick_text} ({market})"
+    has_line = pd.notna(line) and str(line).strip()
 
+    if market == "Total":
+        line_part = f" {line}" if has_line else ""
+        return f"{pick}{line_part} · {_abbr(away_team)} @ {_abbr(home_team)}"
 
-def _bet_option_label(row) -> str:
-    return f"{row.get('Game', '—')} — {_pick_market_label(row)}: {row.get('Best Odds', '—')} @ {row.get('Best Book', '—')}"
+    opponent = away_team if pick == home_team else home_team
+    suffix = "ML" if market == "Moneyline" else (str(line) if has_line else "")
+    return f"{_abbr(pick)} {suffix} @ {_abbr(opponent)}".replace("  ", " ").strip()
 
 
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False):
@@ -316,127 +345,27 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
 
     _filt["Best Odds"] = _filt["_new_best_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
     _filt["Fair Odds"] = _filt["_new_fair_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
-    _filt["Best Book"] = _filt["_new_best_book"].fillna("—")
     _filt["EV%"] = _filt["_new_ev_num"].apply(fmt_ev)
-    _filt["Pick / Market"] = _filt.apply(_pick_market_label, axis=1)
+    _filt["Bet"] = _filt.apply(_bet_compact_label, axis=1)
+    _filt["Best Odds (Fair)"] = _filt["Best Odds"] + " (" + _filt["Fair Odds"] + ")"
 
     with st.expander("Fair Value Model Results", expanded=True):
-        # Compact primary view: Game stays (a Total's Pick alone — "Over" /
-        # "Under" — is meaningless without it), Pick+Market are combined
-        # into one column, and Best Book moves to Bet Details below rather
-        # than taking up primary-table width.
-        _tbl_cols = ["Game", "Pick / Market", "Best Odds", "Fair Odds", "EV%"]
-        _tbl_display = _filt[[c for c in _tbl_cols if c in _filt.columns]].reset_index(drop=True)
+        _tbl_cols = ["Bet", "Best Odds (Fair)", "EV%"]
+        _tbl_display = _filt[_tbl_cols].reset_index(drop=True)
         st.dataframe(
             _tbl_display, use_container_width=True, hide_index=True,
             height=min(600, 38 + 35 * len(_tbl_display)),
             column_config={
-                "Best Odds":     st.column_config.TextColumn("Best Odds", help=TIPS["best_odds"], width="small"),
-                "Fair Odds":     st.column_config.TextColumn("Fair Odds", help=TIPS["fair_odds"], width="small"),
-                "EV%":           st.column_config.TextColumn("EV%", help=TIPS["ev"], width="small"),
-                "Pick / Market": st.column_config.TextColumn("Pick / Market", width="large"),
+                "Bet":               st.column_config.TextColumn("Bet", width="large"),
+                "Best Odds (Fair)":  st.column_config.TextColumn(
+                    "Best Odds (Fair)",
+                    help=f"{TIPS['best_odds']} Fair Odds in parentheses — {TIPS['fair_odds']}",
+                    width="medium",
+                ),
+                "EV%":               st.column_config.TextColumn("EV%", help=TIPS["ev"], width="small"),
             },
         )
         st.caption(
-            f"{len(_tbl_display)} result{'s' if len(_tbl_display) != 1 else ''} across "
-            f"{len(_book_sel_keys)} selected sportsbook{'s' if len(_book_sel_keys) != 1 else ''}."
+            f"{len(_tbl_display)} result{'s' if len(_tbl_display) != 1 else ''} "
+            f"· {len(_book_sel_keys)} sportsbook{'s' if len(_book_sel_keys) != 1 else ''}"
         )
-
-    # ── Bet Details ───────────────────────────────────────────
-    _bet_labels = [_bet_option_label(r) for _, r in _filt.iterrows()]
-    _num_bets = len(_filt)
-    if st.session_state.get("fvm_bet_detail_idx", 0) >= _num_bets:
-        st.session_state["fvm_bet_detail_idx"] = 0
-
-    with st.expander("Bet Details", expanded=True):
-        _sel_idx = st.selectbox(
-            "Select an opportunity",
-            options=list(range(_num_bets)),
-            format_func=lambda i: _bet_labels[i],
-            key="fvm_bet_detail_idx",
-        )
-        _row = _filt.iloc[_sel_idx]
-        _fair_win_str = _row.get("Fair Win %", "—")
-        _ev_str = _row.get("EV%", "—")
-        _best_odds_str = _row.get("Best Odds", "—")
-        _fair_odds_str = _row.get("Fair Odds", "—")
-
-        _d1, _d2 = st.columns(2)
-        with _d1:
-            st.markdown(f"**Matchup:** {_row.get('Game', '—')}")
-            st.markdown(f"**Date:** {_row.get('Date', '—')}")
-            st.markdown(f"**Market:** {_row.get('Market', '—')}")
-            st.markdown(f"**Pick:** {_pick_market_label(_row)}")
-        with _d2:
-            st.markdown(f"**Best Sportsbook:** {_row.get('Best Book', '—')}")
-            st.markdown(f"**Best Odds:** {_best_odds_str}")
-            st.markdown(f"**Fair Odds:** {_fair_odds_str}")
-            st.markdown(f"**Fair Win %:** {_fair_win_str}")
-
-        _k1, _k2 = st.columns(2)
-        with _k1:
-            st.markdown(f"**EV%:** {_ev_str}")
-        with _k2:
-            st.markdown(f"**Kelly (u):** {_row.get('Kelly (u)') or '—'}")
-        st.caption(f"Consensus confidence: {_row.get('mi_rating_label', '—')}")
-
-        st.divider()
-        _implied_pct = _odds_value_in_format(_row.get("_new_best_odds"), "Implied %")
-        _fair_pct = float(str(_fair_win_str).replace("%", "")) if _fair_win_str != "—" else None
-        _is_positive_ev = str(_ev_str).startswith("+")
-        st.markdown("**Why this is +EV**" if _is_positive_ev else "**EV Breakdown**")
-        if _implied_pct is not None and _fair_pct is not None:
-            _relation = "higher" if _fair_pct > _implied_pct else "lower"
-            st.caption(
-                f"The market-derived fair probability for this pick is {_fair_pct:.1f}%. "
-                f"The best available price ({_best_odds_str}) implies {_implied_pct:.1f}%. "
-                f"Because the fair probability is {_relation} than the price's implied probability, "
-                f"this bet shows an expected value of {_ev_str}."
-            )
-        else:
-            st.caption("Not enough data to break down this opportunity's EV.")
-
-    # ── Sportsbook Prices (sibling expander — Streamlit does not support
-    # nesting expanders inside Bet Details) ─────────────────────────────
-    with st.expander("Sportsbook Prices", expanded=False):
-        _book_table = _row.get("mi_book_table")
-        _game_parts = str(_row.get("Game", "")).split(" vs ")
-        _home_team = _game_parts[0] if len(_game_parts) == 2 else None
-        _pick_label = _row.get("Pick", "")
-        _pick_is_a = (
-            _pick_label == "Over" if _pick_label in ("Over", "Under") else _pick_label == _home_team
-        )
-        if not isinstance(_book_table, list) or not _book_table:
-            st.caption("No per-sportsbook data available for this pick.")
-        else:
-            _odds_key = "_odds_a_raw" if _pick_is_a else "_odds_b_raw"
-            _fair_key = "_fair_a_raw" if _pick_is_a else "_fair_b_raw"
-            _price_rows = []
-            for _b in _book_table:
-                if _b.get("_book_key") not in _book_sel_keys:
-                    continue
-                _p = _b.get(_odds_key)
-                if _p is None:
-                    continue
-                _fair_p = _b.get(_fair_key)
-                _price_rows.append({
-                    "Sportsbook": _b.get("Sportsbook", "—"),
-                    "_raw_price": int(_p),
-                    "Odds": _fmt_best_odds(_p, _odds_format),
-                    "Implied Win %": f"{_fair_p * 100:.1f}%" if _fair_p is not None else "—",
-                })
-            if not _price_rows:
-                st.caption("No selected sportsbook has a current price for this pick.")
-            else:
-                _price_rows.sort(key=lambda r: r["_raw_price"], reverse=True)
-                _price_rows[0]["Sportsbook"] = f"{_price_rows[0]['Sportsbook']} (Best)"
-                _price_df = pd.DataFrame(_price_rows)[["Sportsbook", "Odds", "Implied Win %"]]
-                st.dataframe(_price_df, use_container_width=True, hide_index=True)
-
-    with st.expander("Consensus Breakdown", expanded=False):
-        st.markdown(f"**Consensus confidence:** {_row.get('mi_rating_label', '—')}")
-        st.markdown(f"**Sportsbooks in consensus:** {_row.get('mi_num_books', '—')}")
-        st.markdown(f"**Anchor books used:** {_row.get('mi_num_anchors', '—')}")
-        _anchor_list = _row.get("mi_anchor_list")
-        if _anchor_list:
-            st.caption(f"Anchor books: {_anchor_list}")
