@@ -17,6 +17,7 @@ from tabs import (
     prop_leaderboard,
     sportsbook_screener,
     parlay_builder,
+    arbitrage_tracker,
 )
 
 # =======================
@@ -232,6 +233,8 @@ with st.sidebar.expander("How to use", expanded=False):
    hit-rate streak for a selected prop.
 7. **Sportsbook Screener** — pure line shopping across every sportsbook.
 8. **Parlay Builder** — build and compare multi-leg parlays across sportsbooks.
+9. **Arbitrage Tracker** — scan current prices for markets where the best price on
+   each side, across different books, guarantees a profit regardless of outcome.
         """
     )
 
@@ -304,6 +307,7 @@ def run_app():
         "Prop Research",
         "Sportsbook Screener",
         "Parlay Builder",
+        "Arbitrage Tracker",
     ])
 
     with tabs[0]:
@@ -329,6 +333,9 @@ def run_app():
 
     with tabs[7]:
         parlay_builder.render(supabase, now_utc, eff_bankroll, eff_kelly, authed)
+
+    with tabs[8]:
+        arbitrage_tracker.render(supabase, now_utc, eff_bankroll, eff_kelly)
 
 
 if __name__ == "__main__":
