@@ -29,13 +29,21 @@ BACKOFF_MAX_SECONDS = 30.0  # cap on any single computed delay
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 # ── Dynamic refresh cadence ──
-# Odds refresh frequency depends on how close/active NFL games are. Values
-# are picked at the conservative end of the requested ranges (3 min, not 2;
-# 30 min, not 15) to limit Odds API usage during less time-sensitive states —
-# the live-window requirement (60s) is fixed and drives most of the quota
-# cost regardless of the other three values.
-LIVE_INTERVAL_SECONDS = 60
-PREGAME_INTERVAL_SECONDS = 180    # 3 minutes
+# Odds refresh frequency depends on how close/active NFL games are. GitHub
+# Actions' shortest *supported* scheduled-workflow interval is 5 minutes
+# (confirmed against GitHub's docs — a 1-minute cron trigger is unsupported
+# and unreliable, per docs.github.com/en/actions/using-workflows/
+# events-that-trigger-workflows#schedule). Without a self-looping job or a
+# separate always-on process (neither in place yet), true ~60s live refresh
+# isn't achievable from this workflow alone, so live/pregame/gameday are
+# collapsed to the same value — the workflow's own trigger interval. The
+# state classification below (_classify_game_state) is unchanged and still
+# distinguishes live/pregame/gameday for logging and future use — only the
+# interval each maps to is collapsed for now. To restore separate live
+# (60s) / pregame (~3min) targets later, add a self-looping fetch inside
+# the job (see CLAUDE.md / project notes) and lower these back down.
+LIVE_INTERVAL_SECONDS = 300       # 5 minutes — matches GitHub Actions' minimum supported cron interval
+PREGAME_INTERVAL_SECONDS = 300    # 5 minutes — see note above
 GAMEDAY_INTERVAL_SECONDS = 300    # 5 minutes
 OFFPEAK_INTERVAL_SECONDS = 1800   # 30 minutes
 

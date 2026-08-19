@@ -2,16 +2,20 @@ name: Fetch NFL Odds
 
 on:
   schedule:
-    # Finest interval cron supports (1 min) — matches the live-window
-    # target cadence. fetch_odds_nfl.py self-throttles against the actual
-    # game-state-driven interval (60s live / 3min pregame / 5min gameday /
-    # 30min off-peak), so most off-peak invocations exit immediately with
-    # a single cheap Supabase read and no Odds API call.
-    - cron: "* * * * *"
+    # 5 minutes is GitHub Actions' shortest *supported* scheduled-workflow
+    # interval (docs.github.com/en/actions/using-workflows/
+    # events-that-trigger-workflows#schedule) — a 1-minute cron is not
+    # reliable and runs can be delayed/dropped under high platform load.
+    # fetch_odds_nfl.py self-throttles against the game-state-driven
+    # interval (currently 5min live/pregame/gameday, 30min off-peak — see
+    # fetch_odds_nfl.py for why live/pregame aren't faster than 5min yet),
+    # so off-peak invocations exit immediately with a single cheap Supabase
+    # read and no Odds API call.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 # Prevent overlapping runs: if a previous run is still in progress when the
-# next minute's trigger fires, the new run waits rather than running
+# next scheduled trigger fires, the new run waits rather than running
 # concurrently against the same Supabase tables.
 concurrency:
   group: fetch-nfl-odds
