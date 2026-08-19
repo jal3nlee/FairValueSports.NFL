@@ -4,7 +4,7 @@ import streamlit as st
 
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 
-DEBUG_LIVE = True  # temporary — remove once live scores are confirmed working
+DEBUG_LIVE = False  # temporary — remove once live scores are confirmed working
 
 
 @st.cache_data(ttl=45, show_spinner=False)

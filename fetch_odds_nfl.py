@@ -16,6 +16,7 @@ markets = ["h2h", "spreads", "totals"]
 # regular season — pull both, write them into the same internal "NFL" bucket.
 ODDS_API_SPORT_KEYS = ["americanfootball_nfl", "americanfootball_nfl_preseason"]
 SPORT = "NFL"
+BATCH_SIZE = 500
 
 
 def run_pull():
@@ -40,14 +41,6 @@ def run_pull():
             continue
         total_games += len(data)
 
-        # ── Temporary debug: show exactly what came back for preseason ──
-        if odds_api_sport_key == "americanfootball_nfl_preseason":
-            for g in data:
-                print(
-                    f"  preseason game: {g.get('away_team')} @ {g.get('home_team')} — "
-                    f"{g.get('commence_time')} — {len(g.get('bookmakers', []))} books"
-                )
-
         for market_key in markets:
             snapshot_id = str(uuid.uuid4())
             supabase.table("odds_snapshots").insert({
@@ -59,6 +52,7 @@ def run_pull():
                 "region":    "us",
             }).execute()
 
+            lines = []
             for game in data:
                 event_id      = game["id"]
                 commence_time = game["commence_time"]
@@ -81,10 +75,7 @@ def run_pull():
                             else:
                                 side = None
 
-                            line  = outcome.get("point")
-                            price = outcome.get("price")
-
-                            supabase.table("odds_lines").insert({
+                            lines.append({
                                 "snapshot_id":   snapshot_id,
                                 "event_id":      event_id,
                                 "commence_time": commence_time,
@@ -94,10 +85,14 @@ def run_pull():
                                 "sport":         SPORT,
                                 "market":        market_key,
                                 "side":          side,
-                                "line":          line,
-                                "price":         price,
-                            }).execute()
-                            total_rows += 1
+                                "line":          outcome.get("point"),
+                                "price":         outcome.get("price"),
+                            })
+
+            for i in range(0, len(lines), BATCH_SIZE):
+                batch = lines[i:i + BATCH_SIZE]
+                supabase.table("odds_lines").insert(batch).execute()
+                total_rows += len(batch)
 
     print(f"Done. Inserted {total_rows} rows across {len(ODDS_API_SPORT_KEYS) * len(markets)} snapshots.")
     print(f"Total games pulled across both sport keys: {total_games}")
