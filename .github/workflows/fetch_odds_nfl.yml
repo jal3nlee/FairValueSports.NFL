@@ -2,8 +2,20 @@ name: Fetch NFL Odds
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    # Finest interval cron supports (1 min) — matches the live-window
+    # target cadence. fetch_odds_nfl.py self-throttles against the actual
+    # game-state-driven interval (60s live / 3min pregame / 5min gameday /
+    # 30min off-peak), so most off-peak invocations exit immediately with
+    # a single cheap Supabase read and no Odds API call.
+    - cron: "* * * * *"
   workflow_dispatch:
+
+# Prevent overlapping runs: if a previous run is still in progress when the
+# next minute's trigger fires, the new run waits rather than running
+# concurrently against the same Supabase tables.
+concurrency:
+  group: fetch-nfl-odds
+  cancel-in-progress: false
 
 jobs:
   fetch-odds:
