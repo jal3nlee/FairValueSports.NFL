@@ -91,12 +91,14 @@ def _dispersion_label(row) -> str:
     game (mi_std_dev, already computed by build_market_intelligence — same
     number used by the old confidence rating, just shown directly instead
     of translated into a Strong/Moderate/Weak label). mi_std_dev is stored
-    in probability units (0-1); displayed here in percentage points."""
+    in probability units (0-1, e.g. 0.014 for a 1.4-percentage-point
+    spread), so it's multiplied by 100 — unchanged from before, only the
+    trailing unit text changed from " pp" to "%" — to display as "1.4%"."""
     num_anchors = row.get("mi_num_anchors")
     std_dev = row.get("mi_std_dev")
     if pd.isna(num_anchors) or num_anchors is None or num_anchors < 2 or std_dev is None or pd.isna(std_dev):
         return "—"
-    return f"{float(std_dev) * 100:.1f} pp"
+    return f"{float(std_dev) * 100:.1f}%"
 
 
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False):
@@ -342,24 +344,22 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
     _filt["Best Odds (Fair)"] = _filt["Best Odds"] + " (" + _filt["Fair Odds"] + ")"
     _filt["Dispersion"] = _filt.apply(_dispersion_label, axis=1)
 
-    with st.expander("Fair Value Model Results", expanded=True):
+    with st.expander("FVM", expanded=True):
         _tbl_cols = ["Bet", "Best Odds (Fair)", "EV%", "Dispersion"]
         _tbl_display = _filt[_tbl_cols].reset_index(drop=True)
         st.dataframe(
             _tbl_display, use_container_width=True, hide_index=True,
             height=min(600, 38 + 35 * len(_tbl_display)),
             column_config={
-                "Bet":               st.column_config.TextColumn("Bet", width="large"),
+                "Bet":               st.column_config.TextColumn("Bet"),
                 "Best Odds (Fair)":  st.column_config.TextColumn(
                     "Best Odds (Fair)",
                     help=f"{TIPS['best_odds']} Fair Odds in parentheses — {TIPS['fair_odds']}",
-                    width="small",
                 ),
-                "EV%":               st.column_config.TextColumn("EV%", help=TIPS["ev"], width="small"),
+                "EV%":               st.column_config.TextColumn("EV%", help=TIPS["ev"]),
                 "Dispersion":        st.column_config.TextColumn(
                     "Dispersion",
-                    help="Standard deviation of anchor-book fair probabilities, in percentage points.",
-                    width="small",
+                    help="Standard deviation of anchor-book fair probabilities, shown as a percentage.",
                 ),
             },
         )
