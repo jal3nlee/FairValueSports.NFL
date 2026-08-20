@@ -63,32 +63,11 @@ def _fmt_best_odds(american_price, fmt: str) -> str:
         return f"{p * 100:.1f}%" if p else "—"
 
 
-# Same team-abbreviation map already used by Sportsbook Screener / Matchup
-# Center / Parlay Builder / Market Movers — reused as-is for the compact
-# "Bet" column below rather than introducing a second mapping.
-NFL_TEAM_ABBR = {
-    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
-    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
-    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
-    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
-    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
-    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
-    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
-    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
-    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
-    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
-    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
-}
-
-
-def _abbr(team_name) -> str:
-    mapped = NFL_TEAM_ABBR.get(team_name)
-    return mapped.upper() if mapped else (team_name or "—")
-
-
-def _bet_compact_label(row) -> str:
-    """One mobile-friendly string identifying the exact bet, e.g.
-    'GB ML @ DEN', 'MIA +2.5 @ NYG', or 'Over 36.5 · CIN @ CHI'."""
+def _bet_full_label(row) -> str:
+    """One string identifying the exact bet using full team names, e.g.
+    'Green Bay Packers ML @ Denver Broncos',
+    'Miami Dolphins +2.5 @ New York Giants',
+    'Over 36.5 Cincinnati Bengals @ Chicago Bears'."""
     game = row.get("Game", "")
     teams = game.split(" vs ") if isinstance(game, str) else []
     home_team = teams[0] if len(teams) == 2 else None
@@ -100,11 +79,24 @@ def _bet_compact_label(row) -> str:
 
     if market == "Total":
         line_part = f" {line}" if has_line else ""
-        return f"{pick}{line_part} · {_abbr(away_team)} @ {_abbr(home_team)}"
+        return f"{pick}{line_part} {away_team} @ {home_team}"
 
     opponent = away_team if pick == home_team else home_team
     suffix = "ML" if market == "Moneyline" else (str(line) if has_line else "")
-    return f"{_abbr(pick)} {suffix} @ {_abbr(opponent)}".replace("  ", " ").strip()
+    return f"{pick} {suffix} @ {opponent}".replace("  ", " ").strip()
+
+
+def _dispersion_label(row) -> str:
+    """Raw standard deviation of anchor-book fair probabilities for this
+    game (mi_std_dev, already computed by build_market_intelligence — same
+    number used by the old confidence rating, just shown directly instead
+    of translated into a Strong/Moderate/Weak label). mi_std_dev is stored
+    in probability units (0-1); displayed here in percentage points."""
+    num_anchors = row.get("mi_num_anchors")
+    std_dev = row.get("mi_std_dev")
+    if pd.isna(num_anchors) or num_anchors is None or num_anchors < 2 or std_dev is None or pd.isna(std_dev):
+        return "—"
+    return f"{float(std_dev) * 100:.1f} pp"
 
 
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False):
@@ -346,11 +338,12 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
     _filt["Best Odds"] = _filt["_new_best_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
     _filt["Fair Odds"] = _filt["_new_fair_odds"].apply(lambda v: _fmt_best_odds(v, _odds_format))
     _filt["EV%"] = _filt["_new_ev_num"].apply(fmt_ev)
-    _filt["Bet"] = _filt.apply(_bet_compact_label, axis=1)
+    _filt["Bet"] = _filt.apply(_bet_full_label, axis=1)
     _filt["Best Odds (Fair)"] = _filt["Best Odds"] + " (" + _filt["Fair Odds"] + ")"
+    _filt["Dispersion"] = _filt.apply(_dispersion_label, axis=1)
 
     with st.expander("Fair Value Model Results", expanded=True):
-        _tbl_cols = ["Bet", "Best Odds (Fair)", "EV%"]
+        _tbl_cols = ["Bet", "Best Odds (Fair)", "EV%", "Dispersion"]
         _tbl_display = _filt[_tbl_cols].reset_index(drop=True)
         st.dataframe(
             _tbl_display, use_container_width=True, hide_index=True,
@@ -360,9 +353,14 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed, debug_mode=False)
                 "Best Odds (Fair)":  st.column_config.TextColumn(
                     "Best Odds (Fair)",
                     help=f"{TIPS['best_odds']} Fair Odds in parentheses — {TIPS['fair_odds']}",
-                    width="medium",
+                    width="small",
                 ),
                 "EV%":               st.column_config.TextColumn("EV%", help=TIPS["ev"], width="small"),
+                "Dispersion":        st.column_config.TextColumn(
+                    "Dispersion",
+                    help="Standard deviation of anchor-book fair probabilities, in percentage points.",
+                    width="small",
+                ),
             },
         )
         st.caption(
