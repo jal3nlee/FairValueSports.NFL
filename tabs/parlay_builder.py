@@ -26,6 +26,20 @@ def _logo_url(team_name: str) -> str | None:
     return f"https://a.espncdn.com/i/teamlogos/nfl/500/{abbr}.png" if abbr else None
 
 
+def _fragment_rerun() -> None:
+    """Rerun after a session_state mutation so the already-updated state is
+    reflected on the very next pass, instead of only becoming visible on
+    some later, unrelated interaction. Scoped to the fragment so an Add/
+    Remove click doesn't force every other tab's data loading to re-run —
+    matches the reason this whole body is wrapped in @st.fragment. Falls
+    back to a plain rerun on older Streamlit versions without fragment
+    scoping."""
+    try:
+        st.rerun(scope="fragment")
+    except TypeError:
+        st.rerun()
+
+
 def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
     if not authed:
         st.warning("Sign in to use the Parlay Builder.")
@@ -44,22 +58,28 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
 
     @st.fragment
     def _parlay_builder_body():
-        st.markdown("### Selected Legs")
+        st.markdown("### Current Parlay")
         if not st.session_state.pb_parlay_legs:
             st.info("Add at least two legs by clicking Add on any pick below.")
         else:
-            _legs_df = pd.DataFrame([
-                {"Market": l["Market"], "Game": l["Game"], "Pick": l["Pick"], "Line": l["Line"]}
-                for l in st.session_state.pb_parlay_legs
-            ])
-            st.dataframe(_legs_df, use_container_width=True, hide_index=True)
+            for _leg_i, _leg in enumerate(st.session_state.pb_parlay_legs):
+                _line_part = (
+                    f" {_leg['Line']}" if _leg.get("Market") != "Moneyline" and _leg.get("Line") else ""
+                )
+                _leg_c1, _leg_c2 = st.columns([5, 1])
+                with _leg_c1:
+                    st.write(f"{_leg['Pick']}{_line_part} — {_leg['Game']} ({_leg['Market']})")
+                with _leg_c2:
+                    if st.button("Remove", key=f"pb_leg_remove_{_leg_i}", use_container_width=True):
+                        st.session_state.pb_parlay_legs.pop(_leg_i)
+                        _fragment_rerun()
 
             colA, colB = st.columns(2)
             compare = colA.button("Compare Parlay Odds", use_container_width=True, key="pb_compare")
             if colB.button("Clear All Legs", use_container_width=True,
                            disabled=not st.session_state.pb_parlay_legs, key="pb_clear_all"):
                 st.session_state.pb_parlay_legs = []
-                st.rerun()
+                _fragment_rerun()
 
             if compare and len(st.session_state.pb_parlay_legs) >= 2:
                 _markets_pb = {}
@@ -236,10 +256,12 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                                             and l["Line"] == _leg_line
                                         )
                                     ]
+                                    _fragment_rerun()
                             elif _locked_leg is not None:
                                 _rc2.button("Locked", key=_btn_key, disabled=True, use_container_width=True)
                             else:
                                 if _rc2.button("Add", key=_btn_key, use_container_width=True):
                                     st.session_state.pb_parlay_legs.append(_leg)
+                                    _fragment_rerun()
 
     _parlay_builder_body()
