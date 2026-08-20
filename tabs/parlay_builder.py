@@ -2,28 +2,56 @@
 import pandas as pd
 import streamlit as st
 
-from core.odds_math import american_to_decimal, fmt_odds, parse_iso_dt_utc, EASTERN
+from core.odds_math import american_to_decimal, american_to_implied_prob, fmt_odds, parse_iso_dt_utc, EASTERN
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
 
-NFL_TEAM_ABBR = {
-    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
-    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
-    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
-    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
-    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
-    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
-    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
-    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
-    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
-    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
-    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
-}
+
+def _short_team(team_name) -> str:
+    """Last word of a full team name (e.g. 'Green Bay Packers' -> 'Packers')
+    — every NFL full team name already carried in "Game" ends in the
+    mascot name, so this needs no lookup table."""
+    if not team_name:
+        return "—"
+    return team_name.split()[-1]
 
 
-def _logo_url(team_name: str) -> str | None:
-    abbr = NFL_TEAM_ABBR.get(team_name)
-    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{abbr}.png" if abbr else None
+def _leg_short_label(leg) -> str:
+    """Compact single-string identifier for one parlay leg, e.g.
+    'Packers ML @ Broncos', 'Dolphins +2.5 @ Giants',
+    'Over 44.5 Bengals @ Bears'."""
+    game = leg.get("Game", "")
+    teams = game.split(" vs ") if isinstance(game, str) else []
+    home_team = teams[0] if len(teams) == 2 else None
+    away_team = teams[1] if len(teams) == 2 else None
+    market = leg.get("Market", "")
+    pick = leg.get("Pick", "—")
+    line = leg.get("Line")
+
+    if market == "Total":
+        line_part = f" {line}" if line else ""
+        return f"{pick}{line_part} {_short_team(away_team)} @ {_short_team(home_team)}"
+
+    opponent = away_team if pick == home_team else home_team
+    suffix = "ML" if market == "Moneyline" else (str(line) if line else "")
+    return f"{_short_team(pick)} {suffix} @ {_short_team(opponent)}".replace("  ", " ").strip()
+
+
+def _fmt_odds_in_format(american_price, fmt: str) -> str:
+    """Same small display-only formatting pattern already used in
+    tabs/fair_value_model.py::_fmt_best_odds — no new conversion
+    methodology, just American/Decimal/Implied % presentation of an
+    already-computed American price."""
+    if american_price is None:
+        return "—"
+    price = int(american_price)
+    if fmt == "American":
+        return fmt_odds(price)
+    elif fmt == "Decimal":
+        return f"{american_to_decimal(price):.2f}x"
+    else:
+        p = american_to_implied_prob(price)
+        return f"{p * 100:.1f}%" if p else "—"
 
 
 def _fragment_rerun() -> None:
@@ -46,7 +74,13 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
         return
 
     st.subheader("NFL Parlay Builder")
-    stake = st.number_input("Stake ($)", min_value=1.0, value=10.0, step=1.0, key="pb_stake")
+    _pb_col1, _pb_col2 = st.columns(2)
+    with _pb_col1:
+        stake = st.number_input("Stake ($)", min_value=1.0, value=10.0, step=1.0, key="pb_stake")
+    with _pb_col2:
+        _odds_format = st.selectbox(
+            "Odds Format", ["American", "Decimal", "Implied %"], key="pb_odds_format",
+        )
     st.session_state.setdefault("pb_parlay_legs", [])
 
     _wk = infer_current_week_index(now_utc)
@@ -62,17 +96,30 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
         if not st.session_state.pb_parlay_legs:
             st.info("Add at least two legs by clicking Add on any pick below.")
         else:
-            for _leg_i, _leg in enumerate(st.session_state.pb_parlay_legs):
-                _line_part = (
-                    f" {_leg['Line']}" if _leg.get("Market") != "Moneyline" and _leg.get("Line") else ""
+            _leg_labels = [_leg_short_label(l) for l in st.session_state.pb_parlay_legs]
+            st.dataframe(
+                pd.DataFrame({"Leg": _leg_labels}), use_container_width=True, hide_index=True,
+            )
+
+            # st.dataframe is read-only and can't host a per-row button, so
+            # removal uses the smallest native workaround: a compact table
+            # for display, paired with an adjacent selectbox + Remove
+            # button rather than trying to put an interactive control
+            # inside a table cell.
+            _num_legs = len(st.session_state.pb_parlay_legs)
+            if st.session_state.get("pb_remove_idx", 0) >= _num_legs:
+                st.session_state["pb_remove_idx"] = 0
+            _rm_c1, _rm_c2 = st.columns([3, 1])
+            with _rm_c1:
+                _remove_idx = st.selectbox(
+                    "Remove a leg", options=list(range(_num_legs)),
+                    format_func=lambda i: _leg_labels[i],
+                    key="pb_remove_idx", label_visibility="collapsed",
                 )
-                _leg_c1, _leg_c2 = st.columns([5, 1])
-                with _leg_c1:
-                    st.write(f"{_leg['Pick']}{_line_part} — {_leg['Game']} ({_leg['Market']})")
-                with _leg_c2:
-                    if st.button("Remove", key=f"pb_leg_remove_{_leg_i}", use_container_width=True):
-                        st.session_state.pb_parlay_legs.pop(_leg_i)
-                        _fragment_rerun()
+            with _rm_c2:
+                if st.button("Remove", key="pb_remove_btn", use_container_width=True):
+                    st.session_state.pb_parlay_legs.pop(_remove_idx)
+                    _fragment_rerun()
 
             colA, colB = st.columns(2)
             compare = colA.button("Compare Parlay Odds", use_container_width=True, key="pb_compare")
@@ -123,10 +170,15 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                         except Exception:
                             valid = False; break
                     if valid and combined_dec > 1.0:
+                        # Combined price computed exactly as before (American
+                        # `pa`, decimal `combined_dec`) — Odds Format only
+                        # changes how `pa` is displayed below, never this math.
                         pa = int((combined_dec - 1) * 100) if combined_dec >= 2 else int(-100 / (combined_dec - 1))
+                        _profit = round(stake * (combined_dec - 1), 2)
                         results.append({
                             "Sportsbook": book,
-                            "American Odds": fmt_odds(pa),
+                            "Odds": _fmt_odds_in_format(pa, _odds_format),
+                            "Profit ($)": f"${_profit:,.2f}",
                             "Payout ($)": f"${round(stake * combined_dec, 2):,.2f}",
                             "Lines": ", ".join(line_labels),
                         })
@@ -200,21 +252,13 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
             _teams = _game_label.split(" vs ")
             _ht = _teams[0] if len(_teams) == 2 else _game_label
             _at = _teams[1] if len(_teams) == 2 else ""
-            _away_logo = _logo_url(_at)
-            _home_logo = _logo_url(_ht)
 
-            with st.container(border=True):
-                if _away_logo and _home_logo:
-                    st.markdown(
-                        f"<img src='{_away_logo}' width='20' style='vertical-align:middle;margin-right:4px'/>"
-                        f"**{_at}** @ "
-                        f"<img src='{_home_logo}' width='20' style='vertical-align:middle;margin:0 4px'/>"
-                        f"**{_ht}**",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(f"**{_at} @ {_ht}**")
-
+            # st.expander labels are plain text only (no markdown/HTML), so
+            # the team logos previously shown in the header can't render
+            # here — a real native-Streamlit limitation, not a workaround
+            # left half-finished. The label alone still clearly identifies
+            # the matchup.
+            with st.expander(f"{_at} @ {_ht}", expanded=False):
                 for _mkt_name in ["Moneyline", "Spread", "Total"]:
                     _mkt_rows = _game_rows[_game_rows["Market"] == _mkt_name]
                     if _mkt_rows.empty:
