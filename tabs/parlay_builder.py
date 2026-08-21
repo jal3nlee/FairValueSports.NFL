@@ -107,28 +107,31 @@ def _leg_best_odds(leg, df_all: pd.DataFrame):
     return int(odds) if pd.notna(odds) else None
 
 
-def _leg_bet_label(leg, df_all: pd.DataFrame, odds_format: str) -> str:
-    """Concise selected-side label WITH the current odds inline, e.g.
-    'Lions (-115)', 'Lions -2 (-109)', 'Under 37.5 (-115)' — the matchup
-    itself is shown separately in the Game column, so this doesn't repeat
-    it. leg["Line"] is already the selected side's own correctly-signed
-    line for spreads (build_display_rows pairs each row's "Line" with
-    that row's own Pick — see the away-side spread sign fix, commit
-    b2242a5), so no extra sign derivation is needed here. The odds shown
-    are looked up fresh from the pipeline output and rendered in the
-    currently selected Odds Format, matching Browse Games."""
+def _leg_bet_label(leg) -> str:
+    """Just the selected side, e.g. 'Packers', 'Dolphins +2.5',
+    'Under 37.5' — for the Current Parlay table's Bet column. The price
+    itself lives in the separate Odds column, not embedded here.
+    leg["Line"] is already the selected side's own correctly-signed line
+    for spreads (build_display_rows pairs each row's "Line" with that
+    row's own Pick — see the away-side spread sign fix, commit b2242a5),
+    so no extra sign derivation is needed here."""
     market = leg.get("Market", "")
     pick = leg.get("Pick", "—")
     line = leg.get("Line")
     if market == "Moneyline":
-        core = _short_team(pick)
-    elif market == "Total":
-        core = f"{pick} {line}" if line else pick
-    else:
-        core = f"{_short_team(pick)} {line}" if line else _short_team(pick)
+        return _short_team(pick)
+    if market == "Total":
+        return f"{pick} {line}" if line else pick
+    return f"{_short_team(pick)} {line}" if line else _short_team(pick)
+
+
+def _leg_odds_label(leg, df_all: pd.DataFrame, odds_format: str) -> str:
+    """The selected side's current odds, in the currently selected Odds
+    Format — for the Current Parlay table's separate Odds column. Looked
+    up fresh from the already-fetched pipeline output (Best Odds), same
+    source Browse Games uses for the same pick."""
     odds = _leg_best_odds(leg, df_all)
-    odds_str = _fmt_odds_in_format(odds, odds_format) if odds is not None else "—"
-    return f"{core} ({odds_str})"
+    return _fmt_odds_in_format(odds, odds_format) if odds is not None else "—"
 
 
 def _fmt_odds_in_format(american_price, fmt: str) -> str:
@@ -214,7 +217,8 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                     {
                         "Market": l.get("Market", "—"),
                         "Game": _leg_game_label(l),
-                        "Bet": _leg_bet_label(l, df_all, _odds_format),
+                        "Bet": _leg_bet_label(l),
+                        "Odds": _leg_odds_label(l, df_all, _odds_format),
                     }
                     for l in st.session_state.pb_parlay_legs
                 ]),
@@ -383,83 +387,86 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
             _away_logo = _logo_url(_at)
             _home_logo = _logo_url(_ht)
 
-            # Compact matchup header WITH logos, immediately followed by a
-            # collapsed expander for that game's bets — st.expander labels
-            # are plain text only (no markdown/HTML), so logos can't live
-            # inside the label itself. This keeps them visually associated
-            # with the right game without nesting an expander inside
-            # anything or losing the collapsed-by-default behavior.
-            if _away_logo and _home_logo:
-                st.markdown(
-                    f"<img src='{_away_logo}' width='20' style='vertical-align:middle;margin-right:4px'/>"
-                    f"**{_at}** @ "
-                    f"<img src='{_home_logo}' width='20' style='vertical-align:middle;margin:0 4px'/>"
-                    f"**{_ht}**",
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(f"**{_at} @ {_ht}**")
+            # Outer bordered matchup card + inner collapsible bets section,
+            # mirroring tabs/matchup_center.py's card-within-card pattern
+            # (st.container(border=True) as the outer card, an
+            # st.expander nested inside that same container as the inner
+            # collapsible section — Streamlit allows an expander inside a
+            # bordered container, just not inside another expander).
+            # st.expander labels are plain text only (no markdown/HTML),
+            # so logos live in the outer card's header instead, above the
+            # expander, both inside the same bordered container.
+            with st.container(border=True):
+                if _away_logo and _home_logo:
+                    st.markdown(
+                        f"<img src='{_away_logo}' width='20' style='vertical-align:middle;margin-right:4px'/>"
+                        f"**{_at}** @ "
+                        f"<img src='{_home_logo}' width='20' style='vertical-align:middle;margin:0 4px'/>"
+                        f"**{_ht}**",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(f"**{_at} @ {_ht}**")
 
-            with st.expander("Bets", expanded=False):
-                for _mkt_name in ["Moneyline", "Spread", "Total"]:
-                    _mkt_rows = _game_rows[_game_rows["Market"] == _mkt_name]
-                    if _mkt_rows.empty:
-                        continue
-                    _lock_key = (_game_label, _commence_iso, _mkt_name)
-                    _locked_leg = _locked_markets.get(_lock_key)
+                with st.expander("Bets", expanded=False):
+                    for _mkt_name in ["Moneyline", "Spread", "Total"]:
+                        _mkt_rows = _game_rows[_game_rows["Market"] == _mkt_name]
+                        if _mkt_rows.empty:
+                            continue
+                        _lock_key = (_game_label, _commence_iso, _mkt_name)
+                        _locked_leg = _locked_markets.get(_lock_key)
 
-                    st.caption(_mkt_name)
-                    # Each row already fully identifies one bet (Pick + its
-                    # own Line + its own Best Odds) — no need for a separate
-                    # per-line-value grouping pass, which just meant more
-                    # repeated captions for the same information. Row text
-                    # (e.g. "Lions -2 (-109)") matches the same concise
-                    # "side (odds)" format used in the Current Parlay Bet
-                    # column, so the density is consistent everywhere.
-                    for _, _r in _mkt_rows.iterrows():
-                        _pick_label = _r.get("Pick", "—")
-                        _row_line = _r.get("Line")
-                        _leg_line = "ML" if _mkt_name == "Moneyline" else _row_line
-                        _leg = {
-                            "Market": _mkt_name, "Game": _game_label,
-                            "Pick": _pick_label, "Line": _leg_line, "_commence": _commence_iso,
-                        }
-                        _is_this_leg_added = (
-                            _locked_leg is not None
-                            and _locked_leg["Pick"] == _pick_label
-                            and _locked_leg["Line"] == _leg_line
-                        )
-                        _best_odds = _r.get("Best Odds")
-                        _odds_str = (
-                            _fmt_odds_in_format(int(_best_odds), _odds_format)
-                            if pd.notna(_best_odds) else "—"
-                        )
-                        if _mkt_name == "Total":
-                            _row_core = f"{_pick_label} {_row_line}" if pd.notna(_row_line) else _pick_label
-                        elif _mkt_name == "Spread" and pd.notna(_row_line):
-                            _row_core = f"{_short_team(_pick_label)} {_row_line}"
-                        else:
-                            _row_core = _short_team(_pick_label)
-                        _rc1, _rc2 = st.columns([5, 2])
-                        _rc1.write(f"{_row_core} ({_odds_str})")
-                        _btn_key = f"pb_add_{_game_label}_{_commence_iso}_{_mkt_name}_{_pick_label}_{_row_line}"
-                        if _is_this_leg_added:
-                            if _rc2.button("Remove", key=_btn_key, use_container_width=True):
-                                st.session_state.pb_parlay_legs = [
-                                    l for l in st.session_state.pb_parlay_legs
-                                    if not (
-                                        l.get("_commence") == _commence_iso
-                                        and l["Market"] == _mkt_name
-                                        and l["Pick"] == _pick_label
-                                        and l["Line"] == _leg_line
-                                    )
-                                ]
-                                _fragment_rerun()
-                        elif _locked_leg is not None:
-                            _rc2.button("Locked", key=_btn_key, disabled=True, use_container_width=True)
-                        else:
-                            if _rc2.button("Add", key=_btn_key, use_container_width=True):
-                                st.session_state.pb_parlay_legs.append(_leg)
-                                _fragment_rerun()
+                        st.caption(_mkt_name)
+                        # Each row already fully identifies one bet (Pick + its
+                        # own Line + its own Best Odds) — no need for a separate
+                        # per-line-value grouping pass, which just meant more
+                        # repeated captions for the same information. Row text
+                        # (e.g. "Lions -2 (-109)") matches the same concise
+                        # "side (odds)" format used everywhere in this card.
+                        for _, _r in _mkt_rows.iterrows():
+                            _pick_label = _r.get("Pick", "—")
+                            _row_line = _r.get("Line")
+                            _leg_line = "ML" if _mkt_name == "Moneyline" else _row_line
+                            _leg = {
+                                "Market": _mkt_name, "Game": _game_label,
+                                "Pick": _pick_label, "Line": _leg_line, "_commence": _commence_iso,
+                            }
+                            _is_this_leg_added = (
+                                _locked_leg is not None
+                                and _locked_leg["Pick"] == _pick_label
+                                and _locked_leg["Line"] == _leg_line
+                            )
+                            _best_odds = _r.get("Best Odds")
+                            _odds_str = (
+                                _fmt_odds_in_format(int(_best_odds), _odds_format)
+                                if pd.notna(_best_odds) else "—"
+                            )
+                            if _mkt_name == "Total":
+                                _row_core = f"{_pick_label} {_row_line}" if pd.notna(_row_line) else _pick_label
+                            elif _mkt_name == "Spread" and pd.notna(_row_line):
+                                _row_core = f"{_short_team(_pick_label)} {_row_line}"
+                            else:
+                                _row_core = _short_team(_pick_label)
+                            _rc1, _rc2 = st.columns([5, 2])
+                            _rc1.write(f"{_row_core} ({_odds_str})")
+                            _btn_key = f"pb_add_{_game_label}_{_commence_iso}_{_mkt_name}_{_pick_label}_{_row_line}"
+                            if _is_this_leg_added:
+                                if _rc2.button("Remove", key=_btn_key, use_container_width=True):
+                                    st.session_state.pb_parlay_legs = [
+                                        l for l in st.session_state.pb_parlay_legs
+                                        if not (
+                                            l.get("_commence") == _commence_iso
+                                            and l["Market"] == _mkt_name
+                                            and l["Pick"] == _pick_label
+                                            and l["Line"] == _leg_line
+                                        )
+                                    ]
+                                    _fragment_rerun()
+                            elif _locked_leg is not None:
+                                _rc2.button("Locked", key=_btn_key, disabled=True, use_container_width=True)
+                            else:
+                                if _rc2.button("Add", key=_btn_key, use_container_width=True):
+                                    st.session_state.pb_parlay_legs.append(_leg)
+                                    _fragment_rerun()
 
     _parlay_builder_body()
