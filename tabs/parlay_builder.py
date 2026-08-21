@@ -2,9 +2,32 @@
 import pandas as pd
 import streamlit as st
 
-from core.odds_math import american_to_decimal, american_to_implied_prob, fmt_odds, parse_iso_dt_utc, EASTERN
+from core.odds_math import (
+    american_to_decimal, american_to_implied_prob, fmt_odds, parse_iso_dt_utc, EASTERN,
+)
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
+
+# Same team-abbreviation map and ESPN CDN logo URL pattern already used by
+# Sportsbook Screener / Matchup Center / Market Movers — reused as-is.
+NFL_TEAM_ABBR = {
+    "Arizona Cardinals": "ari", "Atlanta Falcons": "atl", "Baltimore Ravens": "bal",
+    "Buffalo Bills": "buf", "Carolina Panthers": "car", "Chicago Bears": "chi",
+    "Cincinnati Bengals": "cin", "Cleveland Browns": "cle", "Dallas Cowboys": "dal",
+    "Denver Broncos": "den", "Detroit Lions": "det", "Green Bay Packers": "gb",
+    "Houston Texans": "hou", "Indianapolis Colts": "ind", "Jacksonville Jaguars": "jax",
+    "Kansas City Chiefs": "kc", "Las Vegas Raiders": "lv", "Los Angeles Chargers": "lac",
+    "Los Angeles Rams": "lar", "Miami Dolphins": "mia", "Minnesota Vikings": "min",
+    "New England Patriots": "ne", "New Orleans Saints": "no", "New York Giants": "nyg",
+    "New York Jets": "nyj", "Philadelphia Eagles": "phi", "Pittsburgh Steelers": "pit",
+    "San Francisco 49ers": "sf", "Seattle Seahawks": "sea", "Tampa Bay Buccaneers": "tb",
+    "Tennessee Titans": "ten", "Washington Commanders": "wsh",
+}
+
+
+def _logo_url(team_name: str) -> str | None:
+    abbr = NFL_TEAM_ABBR.get(team_name)
+    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{abbr}.png" if abbr else None
 
 
 def _short_team(team_name) -> str:
@@ -35,6 +58,35 @@ def _leg_short_label(leg) -> str:
     opponent = away_team if pick == home_team else home_team
     suffix = "ML" if market == "Moneyline" else (str(line) if line else "")
     return f"{_short_team(pick)} {suffix} @ {_short_team(opponent)}".replace("  ", " ").strip()
+
+
+def _leg_game_label(leg) -> str:
+    """Compact matchup only, e.g. 'Packers @ Broncos' (away @ home, short
+    names) — for the Current Parlay table's separate Game column."""
+    game = leg.get("Game", "")
+    teams = game.split(" vs ") if isinstance(game, str) else []
+    if len(teams) != 2:
+        return game
+    home_team, away_team = teams
+    return f"{_short_team(away_team)} @ {_short_team(home_team)}"
+
+
+def _leg_bet_label(leg) -> str:
+    """Just the selected side, e.g. 'Packers -2.5', 'Broncos ML',
+    'Over 44.5' — the matchup itself is shown separately in the Game
+    column, so this doesn't repeat it. leg["Line"] is already the
+    selected side's own correctly-signed line for spreads (build_display_
+    rows pairs each row's "Line" with that row's own Pick — see the
+    away-side spread sign fix, commit b2242a5), so no extra sign
+    derivation is needed here."""
+    market = leg.get("Market", "")
+    pick = leg.get("Pick", "—")
+    line = leg.get("Line")
+    if market == "Moneyline":
+        return f"{_short_team(pick)} ML"
+    if market == "Total":
+        return f"{pick} {line}" if line else pick
+    return f"{_short_team(pick)} {line}" if line else _short_team(pick)
 
 
 def _fmt_odds_in_format(american_price, fmt: str) -> str:
@@ -98,7 +150,11 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
         else:
             _leg_labels = [_leg_short_label(l) for l in st.session_state.pb_parlay_legs]
             st.dataframe(
-                pd.DataFrame({"Leg": _leg_labels}), use_container_width=True, hide_index=True,
+                pd.DataFrame([
+                    {"Market": l.get("Market", "—"), "Game": _leg_game_label(l), "Bet": _leg_bet_label(l)}
+                    for l in st.session_state.pb_parlay_legs
+                ]),
+                use_container_width=True, hide_index=True,
             )
 
             # st.dataframe is read-only and can't host a per-row button, so
@@ -143,7 +199,6 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                 results = []
                 for book in every_book:
                     combined_dec = 1.0
-                    line_labels = []
                     valid = True
                     for leg in st.session_state.pb_parlay_legs:
                         src = _markets_pb.get(leg["Market"])
@@ -158,13 +213,10 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                         row = s.iloc[0]
                         if leg["Market"] == "Moneyline":
                             price = row["home_price"] if leg["Pick"] == row["home_team"] else row["away_price"]
-                            line_labels.append("ML")
                         elif leg["Market"] == "Spread":
                             price = row["home_price"] if leg["Pick"] == row["home_team"] else row["away_price"]
-                            line_labels.append(leg["Line"])
                         else:
                             price = row["over_price"] if leg["Pick"].lower() == "over" else row["under_price"]
-                            line_labels.append(leg["Line"])
                         try:
                             combined_dec *= american_to_decimal(price)
                         except Exception:
@@ -178,9 +230,8 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                         results.append({
                             "Sportsbook": book,
                             "Odds": _fmt_odds_in_format(pa, _odds_format),
-                            "Profit ($)": f"${_profit:,.2f}",
                             "Payout ($)": f"${round(stake * combined_dec, 2):,.2f}",
-                            "Lines": ", ".join(line_labels),
+                            "Profit ($)": f"${_profit:,.2f}",
                         })
 
                 if not results:
@@ -252,13 +303,27 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
             _teams = _game_label.split(" vs ")
             _ht = _teams[0] if len(_teams) == 2 else _game_label
             _at = _teams[1] if len(_teams) == 2 else ""
+            _away_logo = _logo_url(_at)
+            _home_logo = _logo_url(_ht)
 
-            # st.expander labels are plain text only (no markdown/HTML), so
-            # the team logos previously shown in the header can't render
-            # here — a real native-Streamlit limitation, not a workaround
-            # left half-finished. The label alone still clearly identifies
-            # the matchup.
-            with st.expander(f"{_at} @ {_ht}", expanded=False):
+            # Compact matchup header WITH logos, immediately followed by a
+            # collapsed expander for that game's bets — st.expander labels
+            # are plain text only (no markdown/HTML), so logos can't live
+            # inside the label itself. This keeps them visually associated
+            # with the right game without nesting an expander inside
+            # anything or losing the collapsed-by-default behavior.
+            if _away_logo and _home_logo:
+                st.markdown(
+                    f"<img src='{_away_logo}' width='20' style='vertical-align:middle;margin-right:4px'/>"
+                    f"**{_at}** @ "
+                    f"<img src='{_home_logo}' width='20' style='vertical-align:middle;margin:0 4px'/>"
+                    f"**{_ht}**",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(f"**{_at} @ {_ht}**")
+
+            with st.expander("Bets", expanded=False):
                 for _mkt_name in ["Moneyline", "Spread", "Total"]:
                     _mkt_rows = _game_rows[_game_rows["Market"] == _mkt_name]
                     if _mkt_rows.empty:
@@ -266,46 +331,55 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                     _lock_key = (_game_label, _commence_iso, _mkt_name)
                     _locked_leg = _locked_markets.get(_lock_key)
 
-                    _has_line = "Line" in _mkt_rows.columns and _mkt_rows["Line"].notna().any()
-                    _line_vals = (
-                        sorted(_mkt_rows["Line"].dropna().unique(), key=lambda x: str(x)) if _has_line else [None]
-                    )
-                    for _lv in _line_vals:
-                        _sub = _mkt_rows[_mkt_rows["Line"] == _lv] if _lv is not None else _mkt_rows
-                        _label = _mkt_name + (f" — line {_lv}" if _lv is not None else "")
-                        st.caption(_label)
-                        for _, _r in _sub.iterrows():
-                            _pick_label = _r.get("Pick", "—")
-                            _leg_line = "ML" if _mkt_name == "Moneyline" else _r.get("Line", "")
-                            _leg = {
-                                "Market": _mkt_name, "Game": _game_label,
-                                "Pick": _pick_label, "Line": _leg_line, "_commence": _commence_iso,
-                            }
-                            _is_this_leg_added = (
-                                _locked_leg is not None
-                                and _locked_leg["Pick"] == _pick_label
-                                and _locked_leg["Line"] == _leg_line
-                            )
-                            _rc1, _rc2 = st.columns([4, 1])
-                            _rc1.write(_pick_label)
-                            _btn_key = f"pb_add_{_game_label}_{_commence_iso}_{_mkt_name}_{_pick_label}_{_lv}"
-                            if _is_this_leg_added:
-                                if _rc2.button("Remove", key=_btn_key, use_container_width=True):
-                                    st.session_state.pb_parlay_legs = [
-                                        l for l in st.session_state.pb_parlay_legs
-                                        if not (
-                                            l.get("_commence") == _commence_iso
-                                            and l["Market"] == _mkt_name
-                                            and l["Pick"] == _pick_label
-                                            and l["Line"] == _leg_line
-                                        )
-                                    ]
-                                    _fragment_rerun()
-                            elif _locked_leg is not None:
-                                _rc2.button("Locked", key=_btn_key, disabled=True, use_container_width=True)
-                            else:
-                                if _rc2.button("Add", key=_btn_key, use_container_width=True):
-                                    st.session_state.pb_parlay_legs.append(_leg)
-                                    _fragment_rerun()
+                    st.markdown(f"**{_mkt_name}**")
+                    # Each row already fully identifies one bet (Pick + its
+                    # own Line + its own Best Odds) — no need for a separate
+                    # per-line-value grouping pass, which just meant more
+                    # repeated captions for the same information.
+                    for _, _r in _mkt_rows.iterrows():
+                        _pick_label = _r.get("Pick", "—")
+                        _row_line = _r.get("Line")
+                        _leg_line = "ML" if _mkt_name == "Moneyline" else _row_line
+                        _leg = {
+                            "Market": _mkt_name, "Game": _game_label,
+                            "Pick": _pick_label, "Line": _leg_line, "_commence": _commence_iso,
+                        }
+                        _is_this_leg_added = (
+                            _locked_leg is not None
+                            and _locked_leg["Pick"] == _pick_label
+                            and _locked_leg["Line"] == _leg_line
+                        )
+                        _best_odds = _r.get("Best Odds")
+                        _odds_str = (
+                            _fmt_odds_in_format(int(_best_odds), _odds_format)
+                            if pd.notna(_best_odds) else "—"
+                        )
+                        if _mkt_name == "Total":
+                            _row_core = f"{_pick_label} {_row_line}" if pd.notna(_row_line) else _pick_label
+                        elif _mkt_name == "Spread" and pd.notna(_row_line):
+                            _row_core = f"{_short_team(_pick_label)} {_row_line}"
+                        else:
+                            _row_core = _short_team(_pick_label)
+                        _rc1, _rc2 = st.columns([4, 1])
+                        _rc1.write(f"{_row_core}  {_odds_str}")
+                        _btn_key = f"pb_add_{_game_label}_{_commence_iso}_{_mkt_name}_{_pick_label}_{_row_line}"
+                        if _is_this_leg_added:
+                            if _rc2.button("Remove", key=_btn_key, use_container_width=True):
+                                st.session_state.pb_parlay_legs = [
+                                    l for l in st.session_state.pb_parlay_legs
+                                    if not (
+                                        l.get("_commence") == _commence_iso
+                                        and l["Market"] == _mkt_name
+                                        and l["Pick"] == _pick_label
+                                        and l["Line"] == _leg_line
+                                    )
+                                ]
+                                _fragment_rerun()
+                        elif _locked_leg is not None:
+                            _rc2.button("Locked", key=_btn_key, disabled=True, use_container_width=True)
+                        else:
+                            if _rc2.button("Add", key=_btn_key, use_container_width=True):
+                                st.session_state.pb_parlay_legs.append(_leg)
+                                _fragment_rerun()
 
     _parlay_builder_body()
