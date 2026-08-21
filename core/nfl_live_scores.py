@@ -71,6 +71,8 @@ def get_game_status(events: list[dict], home_abbr: str, away_abbr: str) -> dict:
 
 
 def format_live_line(status: dict) -> str | None:
+    """Away-home score ordering, matching the "Away @ Home" matchup
+    header used throughout Matchup Center."""
     if not status or status.get("state") not in ("in", "post"):
         return None
     home_s = status.get("home_score")
@@ -82,5 +84,5 @@ def format_live_line(status: dict) -> str | None:
     period = status.get("period")
     clock = status.get("clock")
     if period and clock:
-        return f"LIVE — {away_s}-{home_s} (Q{period} · {clock})"
-    return f"LIVE — {away_s}-{home_s}"
+        return f"Live | {away_s}-{home_s} (Q{period} · {clock})"
+    return f"Live | {away_s}-{home_s}"

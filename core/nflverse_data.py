@@ -188,6 +188,26 @@ def _load_teams():
         return None
 
 
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _load_schedules(season: int):
+    if not _NFLVERSE_AVAILABLE:
+        return None
+    try:
+        return nfl.load_schedules(seasons=season)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _load_injuries(season: int):
+    if not _NFLVERSE_AVAILABLE:
+        return None
+    try:
+        return nfl.load_injuries(seasons=season)
+    except Exception:
+        return None
+
+
 def get_current_season() -> int:
     if not _NFLVERSE_AVAILABLE:
         return None

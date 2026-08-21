@@ -6,6 +6,9 @@ from core.odds_math import american_to_decimal, american_to_implied_prob, fmt_od
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
 from core.nfl_live_scores import fetch_nfl_scoreboard, get_game_status, format_live_line
+from core.nflverse_data import get_current_season
+from core.nfl_matchup_context import TEAM_COMPARISON_METRICS, get_team_comparison_stats, get_team_recent_form
+from core.nfl_injuries_data import get_team_injuries
 
 TIPS = {
     "ev":        "Expected Value — your edge vs. the fair price. Positive = favorable bet.",
@@ -140,6 +143,14 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
     # game below, not re-fetched per card. ────────────────────────────
     _scoreboard_events = fetch_nfl_scoreboard()
 
+    # Resolved once per render, not per team/game, and threaded through
+    # explicitly to the Team Comparison/Recent Form/Injuries lookups
+    # below (same reasoning as the shared scoreboard fetch above) — those
+    # lookups are cached nflreadpy reads, but get_current_season() itself
+    # currently has a debug st.caption side effect that would otherwise
+    # fire dozens of times in one render if resolved per-team/per-game.
+    _nfl_season = get_current_season()
+
     _games_ordered = (
         _df_mc.assign(_sort_dt=_df_mc["commence_time"].apply(parse_iso_dt_utc))
         .dropna(subset=["_sort_dt"])
@@ -218,17 +229,22 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
                     )
                 else:
                     st.markdown(f"**{_at} @ {_ht}**")
+            _is_live = _game_status.get("state") == "in"
             with _cc2:
-                if _live_line and _game_status.get("state") == "in":
-                    st.markdown(
-                        f"<span style='color:#e74c3c;font-weight:600;font-size:0.8rem'>LIVE</span>",
-                        unsafe_allow_html=True,
-                    )
-                else:
+                if not _is_live:
                     st.caption(_et.strftime("%a %I:%M %p ET").lstrip("0").replace(" 0", " "))
 
             if _live_line:
-                st.caption(_live_line)
+                # One compact status line — not a separate badge plus a
+                # second repeating line — red only while actually live;
+                # scheduled/final states are never styled red.
+                if _is_live:
+                    st.markdown(
+                        f"<span style='color:#e74c3c;font-weight:600'>{_live_line}</span>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(_live_line)
 
             st.caption(f"ML: {_favorite_str} / {_underdog_str}   ·   {_total_str}   ·   Spread: {_sp_str}")
 
@@ -256,31 +272,85 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
                     )
                 st.divider()
 
-                # ── 2. Betting Splits ─────────────────────────────
+                # ── 2. Team Comparison ─────────────────────────────
+                # Season-to-date, from nflreadpy team_stats/schedules —
+                # see core/nfl_matchup_context.py for exactly which
+                # fields are/aren't reliably available (no third-down or
+                # red-zone efficiency data exists in this dataset, so
+                # those metrics are intentionally not included).
+                st.markdown("#### Team Comparison")
+                _away_cmp = get_team_comparison_stats(_nfl_season, _at)
+                _home_cmp = get_team_comparison_stats(_nfl_season, _ht)
+                if _away_cmp and _home_cmp:
+                    _cmp_rows = []
+                    for _cmp_key, _cmp_label in TEAM_COMPARISON_METRICS:
+                        _av = _away_cmp.get(_cmp_key)
+                        _hv = _home_cmp.get(_cmp_key)
+                        if _cmp_key == "turnover_margin":
+                            _av_s = f"{_av:+d}" if _av is not None else "—"
+                            _hv_s = f"{_hv:+d}" if _hv is not None else "—"
+                        else:
+                            _av_s = f"{_av:.1f}" if _av is not None else "—"
+                            _hv_s = f"{_hv:.1f}" if _hv is not None else "—"
+                        _cmp_rows.append({"Away": _av_s, "Metric": _cmp_label, "Home": _hv_s})
+                    st.dataframe(pd.DataFrame(_cmp_rows), use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"Season-to-date, through {_away_cmp['games_played']} ({_at}) / "
+                        f"{_home_cmp['games_played']} ({_ht}) games played."
+                    )
+                else:
+                    st.info("Team stats aren't available yet for one or both teams this season.")
+                st.divider()
+
+                # ── 3. Recent Form ─────────────────────────────────
+                st.markdown("#### Recent Form")
+                _away_form = get_team_recent_form(_nfl_season, _at, n=5)
+                _home_form = get_team_recent_form(_nfl_season, _ht, n=5)
+                _rf_c1, _rf_c2 = st.columns(2)
+                for _rf_col, _rf_team, _rf_form in ((_rf_c1, _at, _away_form), (_rf_c2, _ht, _home_form)):
+                    with _rf_col:
+                        st.caption(_rf_team)
+                        if _rf_form:
+                            st.write(
+                                f"Last {len(_rf_form['games'])}: {_rf_form['record']} · "
+                                f"Avg {_rf_form['avg_scored']}-{_rf_form['avg_allowed']} "
+                                f"(margin {_rf_form['avg_margin']:+.1f})"
+                            )
+                            for _g in reversed(_rf_form["games"]):
+                                st.caption(
+                                    f"{_g['result']} {_g['location']} {_g['opponent']} "
+                                    f"{_g['own_score']}-{_g['opp_score']}"
+                                )
+                        else:
+                            st.caption("No completed games yet this season.")
+                st.divider()
+
+                # ── 4. Injuries ────────────────────────────────────
+                # Official weekly NFL injury report (nflreadpy/nflverse)
+                # — the same data source already relied on for Lineup
+                # Analysis/Prop Research. Shows the most recent report
+                # available for each team; report_status is shown exactly
+                # as published (Out/Doubtful/Questionable/etc.).
+                st.markdown("#### Injuries")
+                _away_inj = get_team_injuries(_nfl_season, _at)
+                _home_inj = get_team_injuries(_nfl_season, _ht)
+                if not _away_inj and not _home_inj:
+                    st.info("No players are currently listed on the official injury report for either team.")
+                else:
+                    _inj_c1, _inj_c2 = st.columns(2)
+                    for _inj_col, _inj_team, _inj_rows in ((_inj_c1, _at, _away_inj), (_inj_c2, _ht, _home_inj)):
+                        with _inj_col:
+                            st.caption(_inj_team)
+                            if _inj_rows:
+                                st.dataframe(pd.DataFrame(_inj_rows), use_container_width=True, hide_index=True)
+                            else:
+                                st.caption("No players listed.")
+                    st.caption("Source: official weekly NFL injury report (nflverse).")
+                st.divider()
+
+                # ── 5. Betting Splits ──────────────────────────────
                 st.markdown("#### Betting Splits")
                 st.info(
                     "Betting splits require a dedicated data provider and aren't "
                     "available through the current odds feed."
-                )
-                st.divider()
-
-                # ── 3. Team Comparison ─────────────────────────────
-                st.markdown("#### Team Comparison")
-                st.info(
-                    "Team stats require an NFL stats provider — pending a data source decision."
-                )
-                st.divider()
-
-                # ── 4. Recent Form ─────────────────────────────────
-                st.markdown("#### Recent Form")
-                st.info(
-                    "Recent form requires an NFL stats provider — pending a data source decision."
-                )
-                st.divider()
-
-                # ── 5. Injuries ─────────────────────────────────────
-                st.markdown("#### Injuries")
-                st.info(
-                    "Injury reports require a dedicated data provider and aren't "
-                    "available through the current odds/stats feeds."
                 )
