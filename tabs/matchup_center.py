@@ -2,15 +2,14 @@
 import pandas as pd
 import streamlit as st
 
-from core.odds_math import parse_iso_dt_utc, EASTERN
+from core.odds_math import american_to_decimal, american_to_implied_prob, fmt_odds, parse_iso_dt_utc, EASTERN
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
 from core.nfl_live_scores import fetch_nfl_scoreboard, get_game_status, format_live_line
 
 TIPS = {
     "ev":        "Expected Value — your edge vs. the fair price. Positive = favorable bet.",
-    "fair_win":  "Consensus fair probability — the no-vig estimate of this outcome's true likelihood.",
-    "best_odds": "Best available odds — the highest American odds found across all sportsbooks.",
+    "best_odds": "Best available odds — the best price found across all sportsbooks.",
 }
 
 NFL_TEAM_ABBR = {
@@ -53,15 +52,47 @@ def _to_int_odds(x):
         return None
 
 
-def _build_snap_rows(source: pd.DataFrame) -> list[dict]:
+def _fmt_odds_in_format(american_price, fmt: str) -> str:
+    """Same small display-only formatting pattern already used in
+    tabs/fair_value_model.py::_fmt_best_odds / tabs/parlay_builder.py — no
+    new conversion methodology, just American/Decimal/Implied % display
+    of an already-computed American price."""
+    if american_price is None:
+        return "—"
+    if fmt == "American":
+        return fmt_odds(american_price)
+    elif fmt == "Decimal":
+        return f"{american_to_decimal(american_price):.2f}x"
+    else:
+        p = american_to_implied_prob(american_price)
+        return f"{p * 100:.1f}%" if p else "—"
+
+
+def _bet_label(row) -> str:
+    """Explicit selected-side label, e.g. 'Arizona Cardinals ML',
+    'Arizona Cardinals -2.5', 'Over 44.5' — carries its own signed line
+    so the user never has to infer which side owns it. row["Line"] is
+    already the selected pick's own correctly-signed value
+    (core/pipeline.py::build_display_rows pairs each row's "Line" with
+    that row's own Pick), so no extra sign derivation is needed here."""
+    market = row.get("Market", "")
+    pick = row.get("Pick", "—")
+    line = row.get("Line")
+    if market == "Moneyline":
+        return f"{pick} ML"
+    if pd.notna(line) and str(line) not in ("", "nan"):
+        return f"{pick} {line}"
+    return pick
+
+
+def _build_snap_rows(source: pd.DataFrame, odds_format: str) -> list[dict]:
     rows = []
     for _, r in source.iterrows():
         rows.append({
-            "Pick":             r.get("Pick", "—"),
-            "Fair Probability": r.get("Fair Win %", "—"),
-            "Best Book":        _sc_name(r.get("Best Book", "—")),
-            "Best Odds":        r.get("Best Odds", "—"),
-            "EV%":              r.get("EV%", "—"),
+            "Bet":       _bet_label(r),
+            "Best Book": _sc_name(r.get("Best Book", "—")),
+            "Best Odds": _fmt_odds_in_format(_to_int_odds(r.get("Best Odds")), odds_format),
+            "EV%":       r.get("EV%", "—"),
         })
     return rows
 
@@ -71,9 +102,15 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
 
     _wk = infer_current_week_index(now_utc)
     _week_label = "NFL Preseason" if _wk == 0 else f"NFL Week {_wk}"
-    _window_choice = st.selectbox(
-        "Date Range", ["Today", _week_label, "Next 7 Days"], index=1, key="mc_window_choice",
-    )
+    _mc_col1, _mc_col2 = st.columns(2)
+    with _mc_col1:
+        _window_choice = st.selectbox(
+            "Date Range", ["Today", _week_label, "Next 7 Days"], index=1, key="mc_window_choice",
+        )
+    with _mc_col2:
+        _odds_format = st.selectbox(
+            "Odds Format", ["American", "Decimal", "Implied %"], key="mc_odds_format",
+        )
     window_start, window_end, sport_keys, caption_label = get_date_window(now_utc, _window_choice)
 
     st.caption(
@@ -196,35 +233,27 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly):
             st.caption(f"ML: {_favorite_str} / {_underdog_str}   ·   {_total_str}   ·   Spread: {_sp_str}")
 
             with st.expander("View full matchup research", expanded=False):
-                # ── 1. Market Snapshot ────────────────────────────
-                st.markdown("#### Market Snapshot")
-                st.caption("Fair probabilities and best EV across all markets for this game.")
+                # ── 1. Betting Snapshot ────────────────────────────
+                # The fast question this answers: what is the bet, where
+                # is the best price, and what is the edge? Deeper model
+                # detail (Fair Odds, Fair Probability, Confidence/
+                # Dispersion) belongs in Fair Value Model, not here — see
+                # CLAUDE.md's Matchup Center product boundary.
+                st.markdown("#### Betting Snapshot")
                 _snap_source = _game_rows.copy()
-                _has_line = "Line" in _snap_source.columns and _snap_source["Line"].notna().any()
                 _snap_col_config = {
                     "EV%": st.column_config.TextColumn("EV%", help=TIPS["ev"]),
-                    "Fair Probability": st.column_config.TextColumn("Fair Probability", help=TIPS["fair_win"]),
                     "Best Odds": st.column_config.TextColumn("Best Odds", help=TIPS["best_odds"]),
                 }
-                if not _has_line:
-                    _snap_rows = _build_snap_rows(_snap_source)
-                    if _snap_rows:
-                        st.dataframe(pd.DataFrame(_snap_rows), use_container_width=True, hide_index=True,
-                                     column_config=_snap_col_config)
-                else:
-                    _ml_source = _snap_source[_snap_source["Line"].isna() | (_snap_source["Line"] == "")]
-                    _lined_source = _snap_source[_snap_source["Line"].notna() & (_snap_source["Line"] != "")]
-                    if not _ml_source.empty:
-                        st.caption("Moneyline")
-                        st.dataframe(pd.DataFrame(_build_snap_rows(_ml_source)), use_container_width=True,
-                                     hide_index=True, column_config=_snap_col_config)
-                    for _mkt_name in _lined_source["Market"].unique():
-                        _mkt_group = _lined_source[_lined_source["Market"] == _mkt_name]
-                        for _line_val in sorted(_mkt_group["Line"].unique(), key=lambda x: str(x)):
-                            _line_group = _mkt_group[_mkt_group["Line"] == _line_val]
-                            st.caption(f"{_mkt_name} — Line {_line_val}")
-                            st.dataframe(pd.DataFrame(_build_snap_rows(_line_group)), use_container_width=True,
-                                         hide_index=True, column_config=_snap_col_config)
+                for _mkt_name in ["Moneyline", "Spread", "Total"]:
+                    _mkt_group = _snap_source[_snap_source["Market"] == _mkt_name]
+                    if _mkt_group.empty:
+                        continue
+                    st.caption(_mkt_name)
+                    st.dataframe(
+                        pd.DataFrame(_build_snap_rows(_mkt_group, _odds_format)),
+                        use_container_width=True, hide_index=True, column_config=_snap_col_config,
+                    )
                 st.divider()
 
                 # ── 2. Betting Splits ─────────────────────────────
