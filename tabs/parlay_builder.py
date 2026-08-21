@@ -3,7 +3,8 @@ import pandas as pd
 import streamlit as st
 
 from core.odds_math import (
-    american_to_decimal, american_to_implied_prob, fmt_odds, parse_iso_dt_utc, EASTERN,
+    american_to_decimal, american_to_implied_prob, expected_value_pct, fmt_ev, fmt_odds,
+    parse_iso_dt_utc, EASTERN,
 )
 from core.pipeline import MARKETS, run_market_pipeline
 from core.data_sources import fetch_market_lines, filter_by_window, get_date_window, infer_current_week_index
@@ -71,22 +72,63 @@ def _leg_game_label(leg) -> str:
     return f"{_short_team(away_team)} @ {_short_team(home_team)}"
 
 
-def _leg_bet_label(leg) -> str:
-    """Just the selected side, e.g. 'Packers -2.5', 'Broncos ML',
-    'Over 44.5' — the matchup itself is shown separately in the Game
-    column, so this doesn't repeat it. leg["Line"] is already the
-    selected side's own correctly-signed line for spreads (build_display_
-    rows pairs each row's "Line" with that row's own Pick — see the
-    away-side spread sign fix, commit b2242a5), so no extra sign
-    derivation is needed here."""
+def _leg_pipeline_row(leg, df_all: pd.DataFrame):
+    """Looks up this leg's own row in the already-fetched FVM pipeline
+    output — no new calculation, no new fetch. Matches on (Game, Market,
+    Pick) and, for spread/total, also on Line (a game can have more than
+    one alternate line). Used to read both the consensus fair probability
+    (_fair_raw, for Parlay Comparison EV%) and the Best Odds (for the
+    Current Parlay Bet label) from a single lookup."""
+    if df_all.empty:
+        return None
+    match = df_all[
+        (df_all["Game"] == leg.get("Game")) &
+        (df_all["Market"] == leg.get("Market")) &
+        (df_all["Pick"] == leg.get("Pick"))
+    ]
+    if leg.get("Market") != "Moneyline" and "Line" in match.columns:
+        match = match[match["Line"] == leg.get("Line")]
+    return match.iloc[0] if not match.empty else None
+
+
+def _leg_fair_prob(leg, df_all: pd.DataFrame):
+    row = _leg_pipeline_row(leg, df_all)
+    if row is None:
+        return None
+    fp = row.get("_fair_raw")
+    return float(fp) if pd.notna(fp) else None
+
+
+def _leg_best_odds(leg, df_all: pd.DataFrame):
+    row = _leg_pipeline_row(leg, df_all)
+    if row is None:
+        return None
+    odds = row.get("Best Odds")
+    return int(odds) if pd.notna(odds) else None
+
+
+def _leg_bet_label(leg, df_all: pd.DataFrame, odds_format: str) -> str:
+    """Concise selected-side label WITH the current odds inline, e.g.
+    'Lions (-115)', 'Lions -2 (-109)', 'Under 37.5 (-115)' — the matchup
+    itself is shown separately in the Game column, so this doesn't repeat
+    it. leg["Line"] is already the selected side's own correctly-signed
+    line for spreads (build_display_rows pairs each row's "Line" with
+    that row's own Pick — see the away-side spread sign fix, commit
+    b2242a5), so no extra sign derivation is needed here. The odds shown
+    are looked up fresh from the pipeline output and rendered in the
+    currently selected Odds Format, matching Browse Games."""
     market = leg.get("Market", "")
     pick = leg.get("Pick", "—")
     line = leg.get("Line")
     if market == "Moneyline":
-        return f"{_short_team(pick)} ML"
-    if market == "Total":
-        return f"{pick} {line}" if line else pick
-    return f"{_short_team(pick)} {line}" if line else _short_team(pick)
+        core = _short_team(pick)
+    elif market == "Total":
+        core = f"{pick} {line}" if line else pick
+    else:
+        core = f"{_short_team(pick)} {line}" if line else _short_team(pick)
+    odds = _leg_best_odds(leg, df_all)
+    odds_str = _fmt_odds_in_format(odds, odds_format) if odds is not None else "—"
+    return f"{core} ({odds_str})"
 
 
 def _fmt_odds_in_format(american_price, fmt: str) -> str:
@@ -144,6 +186,24 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
 
     @st.fragment
     def _parlay_builder_body():
+        # Single fetch reused by Current Parlay (Bet-label odds lookup),
+        # Compare Parlay Odds (fair-probability lookup for EV%), and
+        # Browse Games — no new fetch is introduced by any of these three
+        # consumers needing the same already-fetched pipeline output.
+        _pb_display: dict[str, pd.DataFrame] = {}
+        for _mkt_key, _mkt_cfg in MARKETS.items():
+            _raw_pb, _ = fetch_market_lines(supabase, sport_keys, _mkt_cfg.db_market_key)
+            _raw_pb = filter_by_window(_raw_pb, window_start, window_end)
+            _pb_display[_mkt_key] = run_market_pipeline(
+                raw_lines=_raw_pb, cfg=_mkt_cfg, bankroll=eff_bankroll, kelly=eff_kelly,
+                min_ev=0.0, min_fair_pct=0.0, show_all=True,
+            )
+        df_all = (
+            pd.concat([df for df in _pb_display.values() if not df.empty], ignore_index=True)
+            if any(not df.empty for df in _pb_display.values())
+            else pd.DataFrame()
+        )
+
         st.markdown("### Current Parlay")
         if not st.session_state.pb_parlay_legs:
             st.info("Add at least two legs by clicking Add on any pick below.")
@@ -151,7 +211,11 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
             _leg_labels = [_leg_short_label(l) for l in st.session_state.pb_parlay_legs]
             st.dataframe(
                 pd.DataFrame([
-                    {"Market": l.get("Market", "—"), "Game": _leg_game_label(l), "Bet": _leg_bet_label(l)}
+                    {
+                        "Market": l.get("Market", "—"),
+                        "Game": _leg_game_label(l),
+                        "Bet": _leg_bet_label(l, df_all, _odds_format),
+                    }
                     for l in st.session_state.pb_parlay_legs
                 ]),
                 use_container_width=True, hide_index=True,
@@ -196,6 +260,28 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                     b for df in _markets_pb.values() if not df.empty for b in df["book"].unique()
                 ))
 
+                # Combined fair probability for the parlay = product of
+                # each leg's own consensus fair probability, looked up
+                # from the pipeline output already fetched above (no new
+                # fetch). This treats legs as statistically independent —
+                # an explicit, documented assumption, not a hidden one:
+                # no canonical parlay-level fair-probability methodology
+                # exists elsewhere in this repo (verified by inspecting
+                # core/odds_math.py, core/pipeline.py, and
+                # core/arbitrage_engine.py), and this does not attempt to
+                # model correlation between legs (e.g. same-game legs).
+                # Book-independent, so computed once outside the
+                # per-book loop below; reuses expected_value_pct
+                # (core/odds_math.py) — no new EV formula.
+                _combined_fair_prob = 1.0
+                _fair_prob_valid = True
+                for leg in st.session_state.pb_parlay_legs:
+                    _fp = _leg_fair_prob(leg, df_all)
+                    if _fp is None:
+                        _fair_prob_valid = False
+                        break
+                    _combined_fair_prob *= _fp
+
                 results = []
                 for book in every_book:
                     combined_dec = 1.0
@@ -227,11 +313,16 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                         # changes how `pa` is displayed below, never this math.
                         pa = int((combined_dec - 1) * 100) if combined_dec >= 2 else int(-100 / (combined_dec - 1))
                         _profit = round(stake * (combined_dec - 1), 2)
+                        _ev_str = (
+                            fmt_ev(expected_value_pct(_combined_fair_prob, pa))
+                            if _fair_prob_valid else "—"
+                        )
                         results.append({
                             "Sportsbook": book,
                             "Odds": _fmt_odds_in_format(pa, _odds_format),
                             "Payout ($)": f"${round(stake * combined_dec, 2):,.2f}",
                             "Profit ($)": f"${_profit:,.2f}",
+                            "EV%": _ev_str,
                         })
 
                 if not results:
@@ -247,20 +338,6 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
         st.markdown("### Browse Games")
         st.caption("Scroll through every game and market. Click Add to build your parlay. "
                    "Only one pick per market, per game is allowed.")
-
-        _pb_display: dict[str, pd.DataFrame] = {}
-        for _mkt_key, _mkt_cfg in MARKETS.items():
-            _raw_pb, _ = fetch_market_lines(supabase, sport_keys, _mkt_cfg.db_market_key)
-            _raw_pb = filter_by_window(_raw_pb, window_start, window_end)
-            _pb_display[_mkt_key] = run_market_pipeline(
-                raw_lines=_raw_pb, cfg=_mkt_cfg, bankroll=eff_bankroll, kelly=eff_kelly,
-                min_ev=0.0, min_fair_pct=0.0, show_all=True,
-            )
-        df_all = (
-            pd.concat([df for df in _pb_display.values() if not df.empty], ignore_index=True)
-            if any(not df.empty for df in _pb_display.values())
-            else pd.DataFrame()
-        )
 
         if df_all.empty:
             st.info(f"No games found for {caption_label}.")
@@ -331,11 +408,14 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                     _lock_key = (_game_label, _commence_iso, _mkt_name)
                     _locked_leg = _locked_markets.get(_lock_key)
 
-                    st.markdown(f"**{_mkt_name}**")
+                    st.caption(_mkt_name)
                     # Each row already fully identifies one bet (Pick + its
                     # own Line + its own Best Odds) — no need for a separate
                     # per-line-value grouping pass, which just meant more
-                    # repeated captions for the same information.
+                    # repeated captions for the same information. Row text
+                    # (e.g. "Lions -2 (-109)") matches the same concise
+                    # "side (odds)" format used in the Current Parlay Bet
+                    # column, so the density is consistent everywhere.
                     for _, _r in _mkt_rows.iterrows():
                         _pick_label = _r.get("Pick", "—")
                         _row_line = _r.get("Line")
@@ -360,8 +440,8 @@ def render(supabase, now_utc, eff_bankroll, eff_kelly, authed):
                             _row_core = f"{_short_team(_pick_label)} {_row_line}"
                         else:
                             _row_core = _short_team(_pick_label)
-                        _rc1, _rc2 = st.columns([4, 1])
-                        _rc1.write(f"{_row_core}  {_odds_str}")
+                        _rc1, _rc2 = st.columns([5, 2])
+                        _rc1.write(f"{_row_core} ({_odds_str})")
                         _btn_key = f"pb_add_{_game_label}_{_commence_iso}_{_mkt_name}_{_pick_label}_{_row_line}"
                         if _is_this_leg_added:
                             if _rc2.button("Remove", key=_btn_key, use_container_width=True):
